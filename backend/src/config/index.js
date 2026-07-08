@@ -27,12 +27,20 @@ const config = {
   // JWT（Phase 1 启用）
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d'
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   },
 
-  // 是否启用 API 鉴权
-  authEnabled: process.env.NODE_ENV === 'production'
+  /**
+   * 认证模式开关
+   *
+   * 行为由 auth 中间件控制：
+   * - production 环境 → 永远 JWT 认证，忽略此配置
+   * - development + true  → JWT 认证
+   * - development + false → x-user-id 测试模式
+   *
+   * 显式读取环境变量，不再根据 NODE_ENV 自动推断
+   */
+  authEnabled: process.env.AUTH_ENABLED === 'true'
 };
 
 module.exports = config;
