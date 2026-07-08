@@ -1,8 +1,10 @@
-// ===== 校园互助模块 =====
-// V1 MVP：发布悬赏、悬赏大厅、我的悬赏
+// ===== 校园互助模块 V2.0.1 =====
+// 功能：分类筛选、卡片折叠、状态标签、XP奖励、localStorage兼容
 
 const HelpModule = {
     currentTab: 'hall', // 'publish' | 'hall' | 'my'
+    filterCategory: 'all', // 当前分类筛选
+    expandedCardId: null,  // 当前展开的卡片 ID（单展开模式）
 
     render(container) {
         const user = App.getCurrentUser();
@@ -101,8 +103,41 @@ const HelpModule = {
 
     // ==================== 2. 悬赏大厅 ====================
 
+    renderFilterBar() {
+        // 分类筛选栏，映射值到后端 category 字段
+        const filters = [
+            { value: 'all',      label: '全部', icon: 'fa-globe' },
+            { value: 'package',  label: '跑腿', icon: 'fa-person-running' },
+            { value: 'meal',     label: '代购', icon: 'fa-basket-shopping' },
+            { value: 'borrow',   label: '学习', icon: 'fa-book' },
+            { value: 'other',    label: '其它', icon: 'fa-ellipsis' },
+        ];
+
+        return `
+            <div class="filter-bar">
+                ${filters.map(f => `
+                    <button class="filter-chip ${this.filterCategory === f.value ? 'active' : ''}" data-filter="${f.value}">
+                        <i class="fas ${f.icon}"></i> ${f.label}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    },
+
     renderHall() {
-        const bounties = HelpData.getBounties().filter(b => b.status === 'open');
+        // 映射筛选值到分类
+        const filterMap = {
+            'package': 'package',
+            'meal': 'meal',
+            'borrow': 'borrow',
+            'other': 'other',
+        };
+
+        let bounties = HelpData.getBounties().filter(b => b.status === 'open');
+        // 分类筛选
+        if (this.filterCategory !== 'all' && filterMap[this.filterCategory]) {
+            bounties = bounties.filter(b => b.category === filterMap[this.filterCategory]);
+        }
         // 按紧急程度和创建时间排序
         bounties.sort((a, b) => {
             const urgencyOrder = { urgent: 0, normal: 1, low: 2 };
@@ -112,17 +147,21 @@ const HelpModule = {
             return new Date(b.createdAt) - new Date(a.createdAt);
         });
 
+        const filterBar = this.renderFilterBar();
+
         if (bounties.length === 0) {
             return `
+                ${filterBar}
                 <div class="empty-state">
                     <i class="fas fa-hand-holding-heart"></i>
                     <h4>暂无悬赏</h4>
-                    <p>当前没有进行中的悬赏，快去发布第一个吧！</p>
+                    <p>当前分类下没有进行中的悬赏，快去发布第一个吧！</p>
                 </div>
             `;
         }
 
         return `
+            ${filterBar}
             <div class="hall-stats mb-md">
                 <span class="hall-count">共 <strong>${bounties.length}</strong> 个悬赏待接</span>
             </div>
@@ -132,44 +171,65 @@ const HelpModule = {
         `;
     },
 
-    renderBountyCard(bounty, showActions = true) {
+    renderBountyCard(bounty) {
         const catInfo = HelpData.getCategoryInfo(bounty.category);
         const urgencyInfo = HelpData.getUrgencyInfo(bounty.urgency);
         const timeStr = HelpData.formatTime(bounty.createdAt);
+        const isExpanded = this.expandedCardId === bounty.id;
+        const statusInfo = this.getStatusTagInfo(bounty.status);
+
+        // 截止时间
+        let deadlineStr = '';
+        if (bounty.deadline) {
+            const dl = new Date(bounty.deadline);
+            deadlineStr = `${dl.getMonth() + 1}月${dl.getDate()}日 ${String(dl.getHours()).padStart(2,'0')}:${String(dl.getMinutes()).padStart(2,'0')}截止`;
+        }
 
         return `
-            <div class="card bounty-card" data-bounty-id="${bounty.id}">
-                <div class="bounty-card-header">
-                    <span class="bounty-category-tag" style="background: ${catInfo.color}15; color: ${catInfo.color};">
-                        <i class="fas ${catInfo.icon}"></i> ${catInfo.label}
-                    </span>
-                    <span class="bounty-urgency-tag" style="color: ${urgencyInfo.color};">
-                        <i class="fas ${urgencyInfo.icon}"></i> ${urgencyInfo.label}
-                    </span>
-                </div>
-                <h4 class="bounty-title">${this.escapeHtml(bounty.title)}</h4>
-                <p class="bounty-desc">${this.escapeHtml(bounty.description)}</p>
-                <div class="bounty-meta">
-                    ${bounty.reward ? `<span class="bounty-reward"><i class="fas fa-gift"></i> ${this.escapeHtml(bounty.reward)}</span>` : ''}
-                    ${bounty.location ? `<span class="bounty-location"><i class="fas fa-location-dot"></i> ${this.escapeHtml(bounty.location)}</span>` : ''}
-                </div>
-                <div class="bounty-footer">
-                    <div class="bounty-publisher">
-                        <span class="publisher-avatar" style="background: ${this.getAvatarColor(bounty.publisherName)};">
-                            ${bounty.publisherName.charAt(0)}
+            <div class="card bounty-card ${isExpanded ? 'expanded' : ''}" data-bounty-id="${bounty.id}">
+                <!-- 默认可见区域（折叠头部） -->
+                <div class="bounty-card-summary">
+                    <div class="bounty-card-top-row">
+                        <span class="bounty-category-tag" style="background: ${catInfo.color}15; color: ${catInfo.color};">
+                            <i class="fas ${catInfo.icon}"></i> ${catInfo.label}
                         </span>
-                        <div class="publisher-info">
-                            <span class="publisher-name">${this.escapeHtml(bounty.publisherName)}</span>
-                            <span class="publisher-class">${this.escapeHtml(bounty.publisherClass)}</span>
-                        </div>
+                        <span class="bounty-status-dot" style="background: ${statusInfo.bgColor}; color: ${statusInfo.color};">
+                            ${statusInfo.dot} ${statusInfo.label}
+                        </span>
                     </div>
-                    <div class="bounty-footer-right">
-                        <span class="bounty-time">${timeStr}</span>
-                        ${showActions && bounty.status === 'open' ? `
+                    <h4 class="bounty-title">${this.escapeHtml(bounty.title)}</h4>
+                    <div class="bounty-summary-meta">
+                        ${bounty.reward ? `<span class="bounty-reward"><i class="fas fa-gift"></i> ${this.escapeHtml(bounty.reward)}</span>` : ''}
+                        ${deadlineStr ? `<span class="bounty-deadline"><i class="far fa-clock"></i> ${deadlineStr}</span>` : ''}
+                    </div>
+                    <div class="bounty-expand-hint">
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                </div>
+
+                <!-- 展开区域 -->
+                <div class="bounty-card-detail" style="${isExpanded ? '' : 'display: none;'}">
+                    <p class="bounty-desc">${this.escapeHtml(bounty.description)}</p>
+                    <div class="bounty-meta">
+                        ${bounty.location ? `<span class="bounty-location"><i class="fas fa-location-dot"></i> ${this.escapeHtml(bounty.location)}</span>` : ''}
+                        ${bounty.urgency !== 'normal' ? `<span class="bounty-urgency-tag" style="color: ${urgencyInfo.color};"><i class="fas ${urgencyInfo.icon}"></i> ${urgencyInfo.label}</span>` : ''}
+                    </div>
+                    <div class="bounty-footer">
+                        <div class="bounty-publisher">
+                            <span class="publisher-avatar" style="background: ${this.getAvatarColor(bounty.publisherName)};">
+                                ${bounty.publisherName.charAt(0)}
+                            </span>
+                            <div class="publisher-info">
+                                <span class="publisher-name">${this.escapeHtml(bounty.publisherName)}</span>
+                                <span class="publisher-class">${this.escapeHtml(bounty.publisherClass)}</span>
+                            </div>
+                        </div>
+                        <div class="bounty-footer-right">
+                            <span class="bounty-time">${timeStr}</span>
                             <button class="btn btn-sm btn-primary accept-btn" data-bounty-id="${bounty.id}">
                                 接单
                             </button>
-                        ` : ''}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -228,8 +288,16 @@ const HelpModule = {
 
     renderMyBountyCard(bounty, type) {
         const catInfo = HelpData.getCategoryInfo(bounty.category);
-        const statusInfo = HelpData.getStatusInfo(bounty.status);
+        const statusInfo = this.getStatusTagInfo(bounty.status);
         const timeStr = HelpData.formatTime(bounty.createdAt);
+        const isExpanded = this.expandedCardId === bounty.id;
+
+        // 截止时间
+        let deadlineStr = '';
+        if (bounty.deadline) {
+            const dl = new Date(bounty.deadline);
+            deadlineStr = `${dl.getMonth() + 1}月${dl.getDate()}日 ${String(dl.getHours()).padStart(2,'0')}:${String(dl.getMinutes()).padStart(2,'0')}截止`;
+        }
 
         let actionButtons = '';
         if (type === 'published') {
@@ -249,38 +317,64 @@ const HelpModule = {
         } else if (type === 'accepted') {
             if (bounty.status === 'accepted') {
                 actionButtons = `
-                    <span class="text-secondary font-bold" style="font-size: var(--font-size-xs);">等待对方确认</span>
+                    <button class="btn btn-sm btn-success accept-complete-btn" data-bounty-id="${bounty.id}">
+                        <i class="fas fa-check"></i> 我已完成
+                    </button>
                 `;
             }
         }
 
         return `
-            <div class="card bounty-card" data-bounty-id="${bounty.id}">
-                <div class="bounty-card-header">
-                    <span class="bounty-category-tag" style="background: ${catInfo.color}15; color: ${catInfo.color};">
-                        <i class="fas ${catInfo.icon}"></i> ${catInfo.label}
-                    </span>
-                    <span class="bounty-status-tag" style="background: ${statusInfo.bgColor}; color: ${statusInfo.color};">
-                        ${statusInfo.label}
-                    </span>
-                </div>
-                <h4 class="bounty-title">${this.escapeHtml(bounty.title)}</h4>
-                <p class="bounty-desc">${this.escapeHtml(bounty.description)}</p>
-                <div class="bounty-meta">
-                    ${bounty.reward ? `<span class="bounty-reward"><i class="fas fa-gift"></i> ${this.escapeHtml(bounty.reward)}</span>` : ''}
-                    ${bounty.location ? `<span class="bounty-location"><i class="fas fa-location-dot"></i> ${this.escapeHtml(bounty.location)}</span>` : ''}
-                </div>
-                ${bounty.acceptorName ? `
-                    <div class="bounty-acceptor">
-                        <i class="fas fa-user-check"></i> 接单人：${this.escapeHtml(bounty.acceptorName)} · ${this.escapeHtml(bounty.acceptorClass)}
+            <div class="card bounty-card ${isExpanded ? 'expanded' : ''}" data-bounty-id="${bounty.id}">
+                <!-- 折叠头部 -->
+                <div class="bounty-card-summary">
+                    <div class="bounty-card-top-row">
+                        <span class="bounty-category-tag" style="background: ${catInfo.color}15; color: ${catInfo.color};">
+                            <i class="fas ${catInfo.icon}"></i> ${catInfo.label}
+                        </span>
+                        <span class="bounty-status-dot" style="background: ${statusInfo.bgColor}; color: ${statusInfo.color};">
+                            ${statusInfo.dot} ${statusInfo.label}
+                        </span>
                     </div>
-                ` : ''}
-                <div class="bounty-footer">
-                    <span class="bounty-time">${timeStr}</span>
-                    ${actionButtons}
+                    <h4 class="bounty-title">${this.escapeHtml(bounty.title)}</h4>
+                    <div class="bounty-summary-meta">
+                        ${bounty.reward ? `<span class="bounty-reward"><i class="fas fa-gift"></i> ${this.escapeHtml(bounty.reward)}</span>` : ''}
+                        ${deadlineStr ? `<span class="bounty-deadline"><i class="far fa-clock"></i> ${deadlineStr}</span>` : ''}
+                    </div>
+                    <div class="bounty-expand-hint">
+                        <i class="fas fa-chevron-down"></i>
+                    </div>
+                </div>
+
+                <!-- 展开区域 -->
+                <div class="bounty-card-detail" style="${isExpanded ? '' : 'display: none;'}">
+                    <p class="bounty-desc">${this.escapeHtml(bounty.description)}</p>
+                    <div class="bounty-meta">
+                        ${bounty.location ? `<span class="bounty-location"><i class="fas fa-location-dot"></i> ${this.escapeHtml(bounty.location)}</span>` : ''}
+                    </div>
+                    ${bounty.acceptorName ? `
+                        <div class="bounty-acceptor">
+                            <i class="fas fa-user-check"></i> 接单人：${this.escapeHtml(bounty.acceptorName)} · ${this.escapeHtml(bounty.acceptorClass)}
+                        </div>
+                    ` : ''}
+                    <div class="bounty-footer">
+                        <span class="bounty-time">${timeStr}</span>
+                        ${actionButtons}
+                    </div>
                 </div>
             </div>
         `;
+    },
+
+    // ==================== 状态标签 ====================
+    getStatusTagInfo(status) {
+        const map = {
+            open:      { label: '可接受', dot: '🟢', color: '#2E7D32', bgColor: '#E8F5E9' },
+            accepted:  { label: '已接受', dot: '🟡', color: '#E65100', bgColor: '#FFF3E0' },
+            completed: { label: '已完成', dot: '🔵', color: '#1565C0', bgColor: '#E3F2FD' },
+            cancelled: { label: '已取消', dot: '⚪', color: '#757575', bgColor: '#F5F5F5' },
+        };
+        return map[status] || map['open'];
     },
 
     // ==================== 事件绑定 ====================
@@ -290,6 +384,7 @@ const HelpModule = {
         document.querySelectorAll('.help-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 this.currentTab = tab.dataset.tab;
+                this.expandedCardId = null; // 切换 tab 重置展开状态
                 const mainContent = document.getElementById('mainContent');
                 this.render(mainContent);
             });
@@ -300,8 +395,9 @@ const HelpModule = {
             this.bindPublishEvents();
         }
 
-        // 悬赏大厅 - 接单
+        // 悬赏大厅
         if (this.currentTab === 'hall') {
+            this.bindFilterEvents();
             this.bindHallEvents();
         }
 
@@ -309,6 +405,9 @@ const HelpModule = {
         if (this.currentTab === 'my') {
             this.bindMyBountiesEvents();
         }
+
+        // 卡片折叠（所有 tab 共用）
+        this.bindCardToggleEvents();
     },
 
     bindPublishEvents() {
@@ -321,7 +420,6 @@ const HelpModule = {
                 selectedCategory = chip.dataset.category;
             });
         });
-        // 默认选中第一个
         const firstChip = document.querySelector('#categorySelector .category-chip');
         if (firstChip) {
             firstChip.classList.add('active');
@@ -337,7 +435,6 @@ const HelpModule = {
                 selectedUrgency = chip.dataset.urgency;
             });
         });
-        // 默认选中"普通"
         const normalChip = document.querySelector('#urgencySelector .urgency-chip[data-urgency="normal"]');
         if (normalChip) {
             normalChip.classList.add('active');
@@ -372,11 +469,30 @@ const HelpModule = {
                 });
 
                 App.showToast('悬赏发布成功！🎉');
+                // 发布悬赏不给 XP
                 this.currentTab = 'hall';
+                this.expandedCardId = null;
                 const mainContent = document.getElementById('mainContent');
                 this.render(mainContent);
             });
         }
+    },
+
+    bindFilterEvents() {
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                this.filterCategory = chip.dataset.filter;
+                this.expandedCardId = null;
+                // 只更新悬赏大厅内容
+                const helpContent = document.getElementById('helpContent');
+                if (helpContent) {
+                    helpContent.innerHTML = this.renderHall();
+                    this.bindFilterEvents();
+                    this.bindHallEvents();
+                    this.bindCardToggleEvents();
+                }
+            });
+        });
     },
 
     bindHallEvents() {
@@ -403,6 +519,7 @@ const HelpModule = {
                     });
                     App.showToast('接单成功！请尽快完成 🤝');
                     this.currentTab = 'my';
+                    this.expandedCardId = null;
                     const mainContent = document.getElementById('mainContent');
                     this.render(mainContent);
                 }
@@ -425,17 +542,80 @@ const HelpModule = {
             });
         });
 
-        // 确认完成
+        // 确认完成（发布者操作：仅改状态，不给 XP）
         document.querySelectorAll('.complete-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const bountyId = btn.dataset.bountyId;
-                if (confirm('确认该悬赏已完成？')) {
+                if (confirm('确认该悬赏已完成？完成后接单的同学将获得奖励。')) {
                     HelpData.completeBounty(bountyId);
-                    App.showToast('悬赏已完成！🎉');
+
+                    // 发布者确认完成不给 XP，只提示状态变更
+                    App.showToast('悬赏已确认完成 ✓');
+
                     const mainContent = document.getElementById('mainContent');
                     this.render(mainContent);
                 }
+            });
+        });
+
+        // 我已完成（接受者操作：改状态 + 奖励 XP）
+        document.querySelectorAll('.accept-complete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const bountyId = btn.dataset.bountyId;
+                if (confirm('确认你已完成这个悬赏任务？')) {
+                    HelpData.completeBounty(bountyId);
+
+                    // 完成互助：+20 XP（奖励给接受者，即当前用户）
+                    const xpResult = App.addXP(20, '完成互助');
+                    if (xpResult.leveledUp) {
+                        App.showXPToast(`🎉 完成互助！+${xpResult.xpGained}XP | 升级到 Lv.${xpResult.newLevel} ${xpResult.newTitle}！`, 3000);
+                    } else {
+                        App.showXPToast(`🎉 完成互助！+${xpResult.xpGained}XP`, 2500);
+                    }
+
+                    const mainContent = document.getElementById('mainContent');
+                    this.render(mainContent);
+                }
+            });
+        });
+    },
+
+    // 卡片折叠事件（单展开模式）
+    bindCardToggleEvents() {
+        document.querySelectorAll('.bounty-card').forEach(card => {
+            const summary = card.querySelector('.bounty-card-summary');
+            if (!summary) return;
+
+            // 移除旧事件（避免重复绑定）
+            const newSummary = summary.cloneNode(true);
+            summary.parentNode.replaceChild(newSummary, summary);
+
+            newSummary.addEventListener('click', () => {
+                const bountyId = card.dataset.bountyId;
+
+                // 如果点击的是当前已展开的卡片，则折叠
+                if (this.expandedCardId === bountyId) {
+                    this.expandedCardId = null;
+                } else {
+                    // 折叠之前展开的卡片
+                    this.expandedCardId = bountyId;
+                }
+
+                // 刷新当前 tab 内容以更新展开状态
+                const helpContent = document.getElementById('helpContent');
+                if (!helpContent) return;
+
+                if (this.currentTab === 'hall') {
+                    helpContent.innerHTML = this.renderHall();
+                    this.bindFilterEvents();
+                    this.bindHallEvents();
+                } else if (this.currentTab === 'my') {
+                    helpContent.innerHTML = this.renderMyBounties();
+                    this.bindMyBountiesEvents();
+                }
+                this.bindCardToggleEvents();
             });
         });
     },
@@ -461,7 +641,9 @@ const HelpModule = {
     // ==================== 动态样式 ====================
 
     addStyles() {
-        if (document.getElementById('help-module-styles')) return;
+        if (document.getElementById('help-module-styles')) {
+            document.getElementById('help-module-styles').remove();
+        }
 
         const style = document.createElement('style');
         style.id = 'help-module-styles';
@@ -555,24 +737,66 @@ const HelpModule = {
                 flex: 1;
             }
 
-            /* 悬赏大厅 */
-            .hall-stats {
+            /* ===== 分类筛选栏 ===== */
+            .filter-bar {
+                display: flex;
+                gap: 8px;
+                margin-bottom: var(--spacing-md);
+                overflow-x: auto;
+                padding-bottom: 4px;
+                -webkit-overflow-scrolling: touch;
+            }
+            .filter-bar::-webkit-scrollbar { display: none; }
+            .filter-chip {
+                flex-shrink: 0;
+                padding: 7px 16px;
+                border-radius: 20px;
+                border: 2px solid var(--color-border);
+                background: var(--color-white);
                 color: var(--color-text-secondary);
                 font-size: var(--font-size-sm);
+                font-weight: 600;
+                transition: all 0.25s;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                white-space: nowrap;
+                cursor: pointer;
+                min-height: 36px;
             }
-            .hall-stats strong {
+            .filter-chip:hover {
+                border-color: var(--color-primary-light);
                 color: var(--color-primary);
             }
+            .filter-chip.active {
+                border-color: var(--color-primary);
+                background: var(--color-primary);
+                color: var(--color-cream);
+                box-shadow: 0 2px 6px rgba(107, 66, 38, 0.2);
+            }
+
+            /* ===== 卡片折叠 ===== */
             .bounty-list {
                 display: flex;
                 flex-direction: column;
                 gap: var(--spacing-md);
             }
             .bounty-card {
-                padding: var(--spacing-lg);
+                padding: 0;
                 cursor: default;
+                overflow: hidden;
+                transition: all 0.3s ease;
             }
-            .bounty-card-header {
+            .bounty-card-summary {
+                padding: var(--spacing-lg);
+                cursor: pointer;
+                position: relative;
+                transition: background 0.2s;
+            }
+            .bounty-card-summary:active {
+                background: var(--color-cream);
+            }
+            .bounty-card-top-row {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
@@ -587,31 +811,64 @@ const HelpModule = {
                 align-items: center;
                 gap: 3px;
             }
-            .bounty-urgency-tag {
-                font-size: var(--font-size-xs);
-                font-weight: 600;
-                display: flex;
-                align-items: center;
-                gap: 3px;
-            }
-            .bounty-status-tag {
-                padding: 3px 10px;
-                border-radius: 12px;
-                font-size: var(--font-size-xs);
-                font-weight: 600;
-            }
             .bounty-title {
                 font-size: var(--font-size-lg);
                 font-weight: 600;
                 color: var(--color-text);
-                margin-bottom: 6px;
+                margin-bottom: 8px;
                 line-height: 1.4;
+                padding-right: 28px;
+            }
+            .bounty-summary-meta {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--spacing-md);
+                font-size: var(--font-size-sm);
+            }
+            .bounty-reward {
+                color: var(--color-warning);
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .bounty-deadline {
+                color: var(--color-text-light);
+                font-size: var(--font-size-xs);
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .bounty-expand-hint {
+                position: absolute;
+                right: var(--spacing-lg);
+                top: 50%;
+                transform: translateY(-50%);
+                color: var(--color-text-light);
+                font-size: var(--font-size-sm);
+                transition: transform 0.3s;
+            }
+            .bounty-card.expanded .bounty-expand-hint {
+                transform: translateY(-50%) rotate(180deg);
+            }
+
+            /* 展开详情 */
+            .bounty-card-detail {
+                padding: 0 var(--spacing-lg) var(--spacing-lg);
+                border-top: 1px solid var(--color-cream-dark);
+                padding-top: var(--spacing-md);
+                animation: helpSlideDown 0.25s ease;
+            }
+            @keyframes helpSlideDown {
+                from { opacity: 0; max-height: 0; }
+                to { opacity: 1; max-height: 500px; }
             }
             .bounty-desc {
                 font-size: var(--font-size-md);
                 color: var(--color-text-secondary);
-                line-height: 1.5;
+                line-height: 1.6;
                 margin-bottom: var(--spacing-md);
+                white-space: pre-wrap;
             }
             .bounty-meta {
                 display: flex;
@@ -626,9 +883,12 @@ const HelpModule = {
                 align-items: center;
                 gap: 4px;
             }
-            .bounty-reward {
-                color: var(--color-warning);
+            .bounty-urgency-tag {
+                font-size: var(--font-size-xs);
                 font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 3px;
             }
             .bounty-acceptor {
                 font-size: var(--font-size-sm);
@@ -690,6 +950,27 @@ const HelpModule = {
                 padding: 6px 16px !important;
                 font-size: var(--font-size-sm) !important;
                 min-height: 34px !important;
+            }
+
+            /* ===== 状态标签 ===== */
+            .bounty-status-dot {
+                padding: 3px 10px;
+                border-radius: 12px;
+                font-size: var(--font-size-xs);
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 3px;
+                flex-shrink: 0;
+            }
+
+            /* 悬赏大厅 */
+            .hall-stats {
+                color: var(--color-text-secondary);
+                font-size: var(--font-size-sm);
+            }
+            .hall-stats strong {
+                color: var(--color-primary);
             }
 
             /* 我的悬赏 */
