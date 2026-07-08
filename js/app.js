@@ -631,6 +631,7 @@ const App = {
             case 'leaderboard': Leaderboard.render(mainContent); break;
             case 'community': Community.render(mainContent); break;
             case 'collection': Collection.render(mainContent); break;
+            case 'help': HelpModule.render(mainContent); break;
         }
 
         mainContent.scrollTop = 0;
