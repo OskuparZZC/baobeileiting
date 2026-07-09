@@ -4,11 +4,13 @@
 
 const app = require('./app');
 const config = require('./config');
-const { testConnection } = require('./config/database');
+const { testConnection, closePool } = require('./config/database');
 
 async function start() {
-  // 测试数据库连接（当前为内存模式）
+  // 测试数据库连接（memory 或 mysql）
   await testConnection();
+
+  const storageLabel = config.db.type === 'mysql' ? 'MySQL' : '内存模式';
 
   // 启动服务
   const server = app.listen(config.port, () => {
@@ -17,15 +19,16 @@ async function start() {
     console.log('╠══════════════════════════════════════════╣');
     console.log(`║  环境:     ${config.nodeEnv.padEnd(27)}║`);
     console.log(`║  端口:     ${String(config.port).padEnd(27)}║`);
-    console.log(`║  存储:     内存模式 (Phase 6 → MySQL)    ║`);
+    console.log(`║  存储:     ${storageLabel.padEnd(27)}║`);
     console.log(`║  健康检查: http://localhost:${config.port}/api/health ║`);
     console.log('╚══════════════════════════════════════════╝');
   });
 
   // 优雅关闭
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     console.log(`\n[Server] 收到 ${signal} 信号，正在关闭服务...`);
-    server.close(() => {
+    server.close(async () => {
+      await closePool();
       console.log('[Server] 服务已关闭');
       process.exit(0);
     });
