@@ -11,14 +11,29 @@
  */
 
 const { BaseModel } = require('./index');
+const { getPool } = require('../config/database');
 const { generateId } = require('../utils/idGenerator');
 const { getXPLevelInfo } = require('../config/xpLevels');
+
+/**
+ * 获取 MySQL DATETIME 格式的本地时间（北京时间）
+ * @returns {string} 格式: YYYY-MM-DD HH:mm:ss
+ */
+function getMysqlDateTime() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  const local = new Date(d.getTime() - offset);
+  return local.toISOString()
+    .slice(0, 19)
+    .replace('T', ' ');
+}
 
 // ==================== UserModel ====================
 
 class UserModel extends BaseModel {
   constructor() {
     super('users');
+    this.pool = getPool();
   }
 
   /**
@@ -26,29 +41,34 @@ class UserModel extends BaseModel {
    * @param {Object} data - { name, className, studentId, passwordHash }
    * @returns {Object} 创建的用户对象
    */
-  register(data) {
-    const now = new Date().toISOString();
-    const todayStr = now.split('T')[0];
-    const user = {
-      id: generateId(),
+  async register(data) {
+    const now = getMysqlDateTime();
+    const id = generateId();
+    await this.pool.execute(
+      `INSERT INTO users (id, name, nickname, class_name, student_id, avatar, password_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        data.name,
+        data.name,
+        data.className || '',
+        data.studentId || '',
+        '',
+        data.passwordHash,
+        now,
+        now,
+      ]
+    );
+    return {
+      id,
       name: data.name,
       className: data.className || '',
       studentId: data.studentId || '',
-      passwordHash: data.passwordHash,
       nickname: data.name,
       avatar: '',
-      joinDate: todayStr,
-      registerDate: todayStr,
-      lastLoginDate: todayStr,
-      xp: 0,
-      level: 1,
-      streak: 1,
-      wx_openid: null,
       createdAt: now,
       updatedAt: now,
     };
-    this.create(user);
-    return user;
   }
 
   /**
@@ -63,13 +83,90 @@ class UserModel extends BaseModel {
   }
 
   /**
+   * 根据 ID 查找用户
+   * @param {string} id
+   * @returns {Object|null}
+   */
+  async findById(id) {
+    const [rows] = await this.pool.execute(
+      'SELECT * FROM users WHERE id = ?',
+      [id]
+    );
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      name: r.name,
+      nickname: r.nickname,
+      className: r.class_name,
+      studentId: r.student_id,
+      avatar: r.avatar,
+      passwordHash: r.password_hash,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  /**
    * 根据学号查找用户（精确匹配，保证唯一）
    * 用于登录
    * @param {string} studentId
    * @returns {Object|null}
    */
-  findByStudentId(studentId) {
-    return this.findAll().find(u => u.studentId === studentId) || null;
+  async findByStudentId(studentId) {
+    const [rows] = await this.pool.execute(
+      'SELECT * FROM users WHERE student_id = ?',
+      [studentId]
+    );
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      name: r.name,
+      nickname: r.nickname,
+      className: r.class_name,
+      studentId: r.student_id,
+      avatar: r.avatar,
+      passwordHash: r.password_hash,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  /**
+   * 更新用户信息
+   * @param {string} id
+   * @param {Object} data - { name?, nickname?, className?, studentId?, avatar?, passwordHash? }
+   * @returns {Object|null}
+   */
+  async update(id, data) {
+    const fieldMap = {
+      name: 'name',
+      nickname: 'nickname',
+      className: 'class_name',
+      studentId: 'student_id',
+      avatar: 'avatar',
+      passwordHash: 'password_hash',
+    };
+    const setClauses = [];
+    const values = [];
+    for (const [key, col] of Object.entries(fieldMap)) {
+      if (data[key] !== undefined) {
+        setClauses.push(`${col} = ?`);
+        values.push(data[key]);
+      }
+    }
+    if (setClauses.length === 0) return this.findById(id);
+
+    setClauses.push('updated_at = ?');
+    values.push(getMysqlDateTime());
+    values.push(id);
+
+    await this.pool.execute(
+      `UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+    return this.findById(id);
   }
 
   /**

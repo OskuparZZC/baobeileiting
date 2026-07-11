@@ -34,12 +34,12 @@ const SALT_ROUNDS = 10;
 router.post('/register',
   validate.required(['name', 'studentId', 'password']),
   validate.passwordRules,
-  (req, res) => {
+  async (req, res) => {
     try {
       const { name, className, studentId, password } = req.body;
 
       // 学号唯一性检查（name 不要求唯一，允许同名不同学号）
-      if (UserModel.findByStudentId(studentId)) {
+      if (await UserModel.findByStudentId(studentId)) {
         return error(res, 409, '该学号已被注册');
       }
 
@@ -47,7 +47,7 @@ router.post('/register',
       const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
 
       // 创建用户
-      const user = UserModel.register({ name, className, studentId, passwordHash });
+      const user = await UserModel.register({ name, className, studentId, passwordHash });
 
       // 创建统计记录
       UserStatsModel.initForUser(user.id);
@@ -70,12 +70,12 @@ router.post('/register',
 
 router.post('/login',
   validate.required(['studentId', 'password']),
-  (req, res) => {
+  async (req, res) => {
     try {
       const { studentId, password } = req.body;
 
       // 通过学号查找用户
-      const user = UserModel.findByStudentId(studentId);
+      const user = await UserModel.findByStudentId(studentId);
       if (!user) {
         return error(res, 401, '学号或密码错误');
       }
@@ -85,9 +85,6 @@ router.post('/login',
       if (!isMatch) {
         return error(res, 401, '学号或密码错误');
       }
-
-      // 更新登录时间
-      UserModel.update(user.id, { lastLoginDate: new Date().toISOString().split('T')[0] });
 
       // 生成 JWT
       const token = generateToken({ userId: user.id, name: user.name });

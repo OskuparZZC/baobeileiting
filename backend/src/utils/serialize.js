@@ -20,6 +20,22 @@ function serializeUser(user, stats = null) {
 
   const levelInfo = getXPLevelInfo(user.xp || 0);
 
+  /**
+   * 将 createdAt / updatedAt 统一转为日期字符串 (YYYY-MM-DD)
+   * 兼容 mysql2 返回的 Date 对象、字符串、以及 null
+   */
+  const toDateStr = (val) => {
+    if (!val) return '';
+    if (val instanceof Date) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    // 字符串：取日期部分
+    return String(val).split('T')[0];
+  };
+
   return {
     // 核心标识
     id: user.id,
@@ -31,8 +47,8 @@ function serializeUser(user, stats = null) {
     avatar: user.avatar || '',
 
     // 时间相关
-    joinDate: user.joinDate || user.createdAt?.split('T')[0] || '',
-    registerDate: user.registerDate || user.createdAt?.split('T')[0] || '',
+    joinDate: user.joinDate || toDateStr(user.createdAt),
+    registerDate: user.registerDate || toDateStr(user.createdAt),
     lastLoginDate: user.lastLoginDate || '',
 
     // XP / 等级相关
