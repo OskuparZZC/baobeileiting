@@ -49,13 +49,13 @@ function jwtAuth(req, res, next) {
  * 通过 x-user-id 请求头注入用户身份
  * 禁止通过 query/body 参数指定 userId
  */
-function devAuth(req, res, next) {
+async function devAuth(req, res, next) {
   const userId = req.headers['x-user-id'];
   if (!userId) {
     return error(res, 401, '测试模式需要 x-user-id 请求头');
   }
 
-  const user = UserModel.findById(userId);
+  const user = await UserModel.findById(userId);
   if (!user) {
     return error(res, 401, '测试用户不存在');
   }
