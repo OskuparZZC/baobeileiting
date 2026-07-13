@@ -9,6 +9,7 @@ const router = express.Router();
 const healthRouter = require('./health');
 const usersRouter = require('./users');
 const recordsRouter = require('./records');
+const drinksRouter = require('./drinks');
 const bountiesRouter = require('./bounties');
 const leaderboardRouter = require('./leaderboard');
 
@@ -16,6 +17,7 @@ const leaderboardRouter = require('./leaderboard');
 router.use('/health', healthRouter);
 router.use('/users', usersRouter);
 router.use('/records', recordsRouter);
+router.use('/drinks', drinksRouter);
 router.use('/bounties', bountiesRouter);
 router.use('/leaderboard', leaderboardRouter);
 

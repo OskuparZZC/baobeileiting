@@ -562,6 +562,49 @@ a {
     color: #F0C040;
 }
 
+/* ===== 饮品选择器升级 ===== */
+.drink-search-wrapper {
+    position: relative;
+}
+
+.drink-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-light);
+    font-size: var(--font-size-md);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.drink-search-input {
+    padding-left: 38px !important;
+}
+.drink-type-toggle {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.drink-type-btn {
+    flex: 1;
+    padding: var(--spacing-md);
+    border-radius: 10px;
+    border: 2px solid var(--color-border);
+    background: var(--color-cream);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-md);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.drink-type-btn.active {
+    background: var(--color-primary);
+    color: var(--color-cream);
+    border-color: var(--color-primary);
+}
+
 /* ===== Modal ===== */
 .modal-overlay {
     position: fixed;

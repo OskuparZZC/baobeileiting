@@ -273,6 +273,11 @@ const Dashboard = {
             ).join('');
 
             const sizeLabel = r.size === 'large' ? '大杯' : r.size === 'medium' ? '中杯' : '小杯';
+            const display = App.getDrinkDisplayName(r);
+
+            const nameHtml = display.isTwoLine
+                ? `<span class="recent-brand">${display.brandLine}</span><span class="recent-drink-name">${display.nameLine}</span>`
+                : `<span class="recent-name-single">${display.nameLine}</span>`;
 
             return `
                 <div class="recent-item">
@@ -281,7 +286,7 @@ const Dashboard = {
                             <i class="fas ${cat.icon}" style="color: ${cat.color};"></i>
                         </div>
                         <div class="recent-info">
-                            <span class="recent-name">${r.drinkName}</span>
+                            <div class="recent-name-block">${nameHtml}</div>
                             <span class="recent-meta">
                                 <span class="tag tag-${r.category}">${cat.label}</span>
                                 <span>${sizeLabel}</span>
@@ -534,8 +539,25 @@ const Dashboard = {
             .recent-item:last-child { border-bottom: none; padding-bottom: 0; }
             .recent-item-left { display: flex; align-items: center; gap: var(--spacing-md); }
             .recent-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-            .recent-info { display: flex; flex-direction: column; gap: 4px; }
-            .recent-name { font-weight: 600; font-size: var(--font-size-md); }
+            .recent-info { display: flex; flex-direction: column; gap: 2px; }
+            .recent-name-block {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+            }
+            .recent-brand {
+                font-size: var(--font-size-xs);
+                color: var(--color-text-light);
+                font-weight: 500;
+            }
+            .recent-drink-name {
+                font-weight: 600;
+                font-size: var(--font-size-md);
+            }
+            .recent-name-single {
+                font-weight: 600;
+                font-size: var(--font-size-md);
+            }
             .recent-meta { display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
             .recent-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
             .recent-price { font-weight: 700; color: var(--color-primary); font-size: var(--font-size-md); }

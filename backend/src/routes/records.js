@@ -18,7 +18,7 @@ const { success, created, error, serverError } = require('../utils/response');
 
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { drinkId, customBrand, customName, size, price, rating, note, date } = req.body;
+    const { drinkId, customBrand, customName, size, price, rating, note, date, time } = req.body;
 
     // 必须有 drinkId 或 (customBrand + customName)
     if (!drinkId && (!customBrand || !customName)) {
@@ -42,6 +42,7 @@ router.post('/', authMiddleware, async (req, res) => {
       rating: rating || null,
       note: note || null,
       date,
+      time: time || null,
     });
 
     return created(res, record, '记录创建成功');

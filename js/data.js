@@ -43,14 +43,14 @@ const userTemplates = [
         joinDate: '2024-09-01',
         avatar: 'assets/avatar.jpg',
         seedRecords: [
-            { id: 1, drinkId: 2, drinkName: '拿铁', category: 'coffee', size: 'medium', price: 18, rating: 4, note: '早上来一杯，提神醒脑', date: '2026-07-07', time: '08:30' },
-            { id: 2, drinkId: 6, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '下午茶时间，珍珠很Q弹', date: '2026-07-06', time: '15:20' },
-            { id: 3, drinkId: 5, drinkName: '冷萃咖啡', category: 'coffee', size: 'medium', price: 25, rating: 4, note: '夏天的感觉', date: '2026-07-06', time: '10:00' },
-            { id: 4, drinkId: 11, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 3, note: '解腻不错', date: '2026-07-05', time: '12:30' },
-            { id: 5, drinkId: 7, drinkName: '椰果奶茶', category: 'milk_tea', size: 'medium', price: 16, rating: 4, note: '椰果很多', date: '2026-07-05', time: '14:00' },
-            { id: 6, drinkId: 1, drinkName: '美式咖啡', category: 'coffee', size: 'large', price: 15, rating: 3, note: '有点苦，下次加糖', date: '2026-07-04', time: '08:00' },
-            { id: 7, drinkId: 14, drinkName: '鲜榨橙汁', category: 'juice', size: 'medium', price: 18, rating: 5, note: '新鲜好喝', date: '2026-07-04', time: '11:00' },
-            { id: 8, drinkId: 9, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '芋泥超赞！', date: '2026-07-03', time: '16:00' },
+            { id: 1, drinkId: 2, customBrand: null, customName: null, drinkName: '拿铁', category: 'coffee', size: 'medium', price: 18, rating: 4, note: '早上来一杯，提神醒脑', date: '2026-07-07', time: '08:30' },
+            { id: 2, drinkId: 6, customBrand: null, customName: null, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '下午茶时间，珍珠很Q弹', date: '2026-07-06', time: '15:20' },
+            { id: 3, drinkId: 5, customBrand: null, customName: null, drinkName: '冷萃咖啡', category: 'coffee', size: 'medium', price: 25, rating: 4, note: '夏天的感觉', date: '2026-07-06', time: '10:00' },
+            { id: 4, drinkId: 11, customBrand: null, customName: null, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 3, note: '解腻不错', date: '2026-07-05', time: '12:30' },
+            { id: 5, drinkId: 7, customBrand: null, customName: null, drinkName: '椰果奶茶', category: 'milk_tea', size: 'medium', price: 16, rating: 4, note: '椰果很多', date: '2026-07-05', time: '14:00' },
+            { id: 6, drinkId: 1, customBrand: null, customName: null, drinkName: '美式咖啡', category: 'coffee', size: 'large', price: 15, rating: 3, note: '有点苦，下次加糖', date: '2026-07-04', time: '08:00' },
+            { id: 7, drinkId: 14, customBrand: null, customName: null, drinkName: '鲜榨橙汁', category: 'juice', size: 'medium', price: 18, rating: 5, note: '新鲜好喝', date: '2026-07-04', time: '11:00' },
+            { id: 8, drinkId: 9, customBrand: null, customName: null, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '芋泥超赞！', date: '2026-07-03', time: '16:00' },
         ]
     },
     {
@@ -60,12 +60,12 @@ const userTemplates = [
         joinDate: '2024-09-01',
         avatar: '',
         seedRecords: [
-            { id: 1, drinkId: 6, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '珍珠奶茶yyds！', date: '2026-07-07', time: '14:00' },
-            { id: 2, drinkId: 9, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '芋泥超细腻', date: '2026-07-07', time: '16:30' },
-            { id: 3, drinkId: 7, drinkName: '椰果奶茶', category: 'milk_tea', size: 'medium', price: 16, rating: 4, note: '椰果很多很满足', date: '2026-07-06', time: '13:00' },
-            { id: 4, drinkId: 8, drinkName: '红豆奶茶', category: 'milk_tea', size: 'medium', price: 17, rating: 4, note: '红豆软糯', date: '2026-07-06', time: '16:00' },
-            { id: 5, drinkId: 6, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '又来一杯', date: '2026-07-05', time: '15:00' },
-            { id: 6, drinkId: 9, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '每周必点', date: '2026-07-04', time: '14:30' },
+            { id: 1, drinkId: 6, customBrand: null, customName: null, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '珍珠奶茶yyds！', date: '2026-07-07', time: '14:00' },
+            { id: 2, drinkId: 9, customBrand: null, customName: null, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '芋泥超细腻', date: '2026-07-07', time: '16:30' },
+            { id: 3, drinkId: 7, customBrand: null, customName: null, drinkName: '椰果奶茶', category: 'milk_tea', size: 'medium', price: 16, rating: 4, note: '椰果很多很满足', date: '2026-07-06', time: '13:00' },
+            { id: 4, drinkId: 8, customBrand: null, customName: null, drinkName: '红豆奶茶', category: 'milk_tea', size: 'medium', price: 17, rating: 4, note: '红豆软糯', date: '2026-07-06', time: '16:00' },
+            { id: 5, drinkId: 6, customBrand: null, customName: null, drinkName: '珍珠奶茶', category: 'milk_tea', size: 'large', price: 16, rating: 5, note: '又来一杯', date: '2026-07-05', time: '15:00' },
+            { id: 6, drinkId: 9, customBrand: null, customName: null, drinkName: '芋泥波波', category: 'milk_tea', size: 'large', price: 20, rating: 5, note: '每周必点', date: '2026-07-04', time: '14:30' },
         ]
     },
     {
@@ -75,11 +75,11 @@ const userTemplates = [
         joinDate: '2024-09-01',
         avatar: '',
         seedRecords: [
-            { id: 1, drinkId: 1, drinkName: '美式咖啡', category: 'coffee', size: 'large', price: 15, rating: 4, note: '每天一杯美式', date: '2026-07-07', time: '07:30' },
-            { id: 2, drinkId: 2, drinkName: '拿铁', category: 'coffee', size: 'medium', price: 18, rating: 5, note: '拉花很漂亮', date: '2026-07-07', time: '10:00' },
-            { id: 3, drinkId: 5, drinkName: '冷萃咖啡', category: 'coffee', size: 'medium', price: 25, rating: 4, note: '夏天喝冷萃正好', date: '2026-07-06', time: '08:00' },
-            { id: 4, drinkId: 3, drinkName: '卡布奇诺', category: 'coffee', size: 'medium', price: 20, rating: 4, note: '奶泡很绵密', date: '2026-07-05', time: '09:00' },
-            { id: 5, drinkId: 4, drinkName: '摩卡', category: 'coffee', size: 'medium', price: 22, rating: 5, note: '巧克力味很浓', date: '2026-07-05', time: '11:00' },
+            { id: 1, drinkId: 1, customBrand: null, customName: null, drinkName: '美式咖啡', category: 'coffee', size: 'large', price: 15, rating: 4, note: '每天一杯美式', date: '2026-07-07', time: '07:30' },
+            { id: 2, drinkId: 2, customBrand: null, customName: null, drinkName: '拿铁', category: 'coffee', size: 'medium', price: 18, rating: 5, note: '拉花很漂亮', date: '2026-07-07', time: '10:00' },
+            { id: 3, drinkId: 5, customBrand: null, customName: null, drinkName: '冷萃咖啡', category: 'coffee', size: 'medium', price: 25, rating: 4, note: '夏天喝冷萃正好', date: '2026-07-06', time: '08:00' },
+            { id: 4, drinkId: 3, customBrand: null, customName: null, drinkName: '卡布奇诺', category: 'coffee', size: 'medium', price: 20, rating: 4, note: '奶泡很绵密', date: '2026-07-05', time: '09:00' },
+            { id: 5, drinkId: 4, customBrand: null, customName: null, drinkName: '摩卡', category: 'coffee', size: 'medium', price: 22, rating: 5, note: '巧克力味很浓', date: '2026-07-05', time: '11:00' },
         ]
     },
     {
@@ -89,11 +89,11 @@ const userTemplates = [
         joinDate: '2024-09-01',
         avatar: '',
         seedRecords: [
-            { id: 1, drinkId: 11, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 4, note: '饭后解腻', date: '2026-07-07', time: '12:30' },
-            { id: 2, drinkId: 12, drinkName: '茉莉花茶', category: 'tea', size: 'medium', price: 10, rating: 5, note: '花香四溢', date: '2026-07-07', time: '16:00' },
-            { id: 3, drinkId: 10, drinkName: '四季春茶', category: 'tea', size: 'large', price: 12, rating: 4, note: '清香回甘', date: '2026-07-06', time: '14:00' },
-            { id: 4, drinkId: 13, drinkName: '柠檬绿茶', category: 'tea', size: 'medium', price: 13, rating: 4, note: '清爽解渴', date: '2026-07-05', time: '11:00' },
-            { id: 5, drinkId: 11, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 5, note: '今天也是乌龙', date: '2026-07-04', time: '13:00' },
+            { id: 1, drinkId: 11, customBrand: null, customName: null, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 4, note: '饭后解腻', date: '2026-07-07', time: '12:30' },
+            { id: 2, drinkId: 12, customBrand: null, customName: null, drinkName: '茉莉花茶', category: 'tea', size: 'medium', price: 10, rating: 5, note: '花香四溢', date: '2026-07-07', time: '16:00' },
+            { id: 3, drinkId: 10, customBrand: null, customName: null, drinkName: '四季春茶', category: 'tea', size: 'large', price: 12, rating: 4, note: '清香回甘', date: '2026-07-06', time: '14:00' },
+            { id: 4, drinkId: 13, customBrand: null, customName: null, drinkName: '柠檬绿茶', category: 'tea', size: 'medium', price: 13, rating: 4, note: '清爽解渴', date: '2026-07-05', time: '11:00' },
+            { id: 5, drinkId: 11, customBrand: null, customName: null, drinkName: '乌龙茶', category: 'tea', size: 'large', price: 12, rating: 5, note: '今天也是乌龙', date: '2026-07-04', time: '13:00' },
         ]
     },
 ];

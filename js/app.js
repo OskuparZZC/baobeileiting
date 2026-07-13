@@ -6,6 +6,10 @@ const App = {
     nextRecordId: 0,
     posts: [],
     notificationCount: 3,
+    drinks: [],               // 饮品列表（后端加载，fallback 到 drinkMenu）
+    brands: [],               // 品牌列表（后端加载）
+    _drinksLoading: false,    // 饮品加载中标记
+    _brandsLoading: false,    // 品牌加载中标记
     // 用户系统
     currentUserId: null,
     users: {},
@@ -43,6 +47,8 @@ const App = {
         this.resolveCurrentUser();
         // 3. 加载当前用户数据
         this.loadCurrentUserData();
+        // 3b. 从后端同步记录（异步，不阻塞 UI）
+        this.syncRecordsFromBackend().catch(err => console.warn('[init] 记录同步异常:', err.message));
         // 4. 同步通知徽标（必须在 loadCurrentUserData 之后）
         this.updateNotificationBadge();
         // 5. 初始化每日任务系统（必须在 checkLoginStreak 之前，否则登录任务无法被标记）
@@ -59,6 +65,131 @@ const App = {
         this.bindProfileBtn();
         this.navigateTo('dashboard');
         this.updateHeaderAvatar();
+
+        // 异步加载后端饮品数据（不阻塞 UI）
+        this.loadDrinks();
+        this.loadBrands();
+    },
+
+    // ===== 饮品数据加载 =====
+
+    /**
+     * 从后端 API 加载饮品列表
+     * 成功：this.drinks = 后端数据
+     * 失败：this.drinks = drinkMenu（本地 fallback）
+     */
+    async loadDrinks() {
+        if (this._drinksLoading) return;
+        this._drinksLoading = true;
+        try {
+            const res = await api.drinks.list();
+            if (res.data && res.data.length > 0) {
+                this.drinks = res.data;
+                console.log(`[drinks] 已从后端加载 ${this.drinks.length} 款饮品`);
+                this._refreshDrinkSelect();
+                return;
+            }
+        } catch (e) {
+            console.warn('[drinks] 后端加载失败，使用本地 fallback:', e.message);
+        } finally {
+            this._drinksLoading = false;
+        }
+        this.drinks = drinkMenu;
+    },
+
+    /**
+     * 从后端 API 加载品牌列表
+     * 成功：this.brands = 后端数据
+     * 失败：this.brands = []（品牌筛选隐藏）
+     */
+    async loadBrands() {
+        if (this._brandsLoading) return;
+        this._brandsLoading = true;
+        try {
+            const res = await api.drinks.brands();
+            if (res.data && res.data.length > 0) {
+                this.brands = res.data;
+                console.log(`[drinks] 已从后端加载 ${this.brands.length} 个品牌`);
+                this._refreshBrandSelect();
+                return;
+            }
+        } catch (e) {
+            console.warn('[drinks] 品牌加载失败:', e.message);
+        } finally {
+            this._brandsLoading = false;
+        }
+        this.brands = [];
+    },
+
+    /**
+     * 获取当前筛选后的饮品列表
+     * @returns {Array} 筛选后的饮品数组
+     */
+    _getFilteredDrinks() {
+        const brandSelect = document.getElementById('drinkBrand');
+        const searchInput = document.getElementById('drinkSearch');
+        const selectedBrandId = brandSelect ? brandSelect.value : '';
+        const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+        return this.drinks.filter(drink => {
+            // 品牌筛选（仅当 drinks 有 brandId 时生效）
+            if (selectedBrandId && drink.brandId != null) {
+                if (String(drink.brandId) !== String(selectedBrandId)) return false;
+            }
+            // 搜索关键词筛选
+            if (keyword) {
+                const name = (drink.name || '').toLowerCase();
+                const desc = (drink.description || '').toLowerCase();
+                if (!name.includes(keyword) && !desc.includes(keyword)) return false;
+            }
+            return true;
+        });
+    },
+
+    /**
+     * 刷新官方饮品下拉框内容（根据品牌筛选和搜索）
+     */
+    _refreshDrinkSelect() {
+        const select = document.getElementById('drinkName');
+        if (!select) return;
+        // 保留第一个 "选择饮品..." option，清空其余
+        while (select.options.length > 1) {
+            select.remove(1);
+        }
+        const filtered = this._getFilteredDrinks();
+        filtered.forEach(drink => {
+            const option = document.createElement('option');
+            option.value = drink.id;
+            // 如果有品牌信息，显示「品牌 - 饮品名」
+            if (drink.brandId && this.brands.length > 0) {
+                const brand = this.brands.find(b => b.id === drink.brandId);
+                option.textContent = brand ? `${brand.name} - ${drink.name}` : drink.name;
+            } else {
+                option.textContent = drink.name;
+            }
+            select.appendChild(option);
+        });
+        // 清空当前选中
+        select.value = '';
+    },
+
+    /**
+     * 刷新品牌下拉框内容
+     */
+    _refreshBrandSelect() {
+        const select = document.getElementById('drinkBrand');
+        if (!select) return;
+        // 保留第一个 "全部品牌" option，清空其余
+        while (select.options.length > 1) {
+            select.remove(1);
+        }
+        this.brands.forEach(brand => {
+            const option = document.createElement('option');
+            option.value = brand.id;
+            option.textContent = brand.name;
+            select.appendChild(option);
+        });
+        select.value = '';
     },
 
     // ===== 用户系统：localStorage 持久化 =====
@@ -201,6 +332,69 @@ const App = {
         this.notificationCount = user.notificationCount || 0;
         // 社区帖子是共享的
         this.posts = JSON.parse(JSON.stringify(seedPosts));
+    },
+
+    /**
+     * 将后端记录转换为前端兼容格式
+     * 补充 drinkName 和 category 字段
+     * @param {Object} record - 后端返回的 record
+     * @returns {Object} 前端兼容的 record
+     */
+    _normalizeBackendRecord(record) {
+        let drinkName = record.drinkName || '';
+        let category = record.category || 'other';
+
+        // 自定义饮品：用 customBrand + customName 拼接
+        if (record.customBrand || record.customName) {
+            const brand = record.customBrand || '';
+            const name = record.customName || '';
+            drinkName = brand && name ? `${brand} - ${name}` : (brand || name);
+            category = record.category || 'other';
+        } else if (record.drinkId) {
+            // 官方饮品：从 this.drinks（后端加载）或 drinkMenu（本地 fallback）查找
+            const allDrinks = this.drinks.length > 0 ? this.drinks : drinkMenu;
+            const drink = allDrinks.find(d => d.id === record.drinkId);
+            if (drink) {
+                drinkName = drink.name;
+                category = drink.category;
+            }
+        }
+
+        return {
+            ...record,
+            drinkName,
+            category,
+        };
+    },
+
+    /**
+     * 从后端同步饮品记录到前端
+     * - 异步执行，不阻塞页面初始化
+     * - 成功则替换 this.records 为后端数据
+     * - 失败则保留 localStorage 现有数据
+     */
+    async syncRecordsFromBackend() {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) {
+            console.log('[records] 未绑定后端用户，跳过同步');
+            return;
+        }
+
+        try {
+            const res = await api.records.me(user._backendId);
+            if (res.data && Array.isArray(res.data.records)) {
+                const backendRecords = res.data.records.map(r => this._normalizeBackendRecord(r));
+                this.records = backendRecords;
+                this.nextRecordId = backendRecords.length > 0
+                    ? Math.max(...backendRecords.map(r => r.id)) + 1
+                    : 1;
+                // 同步到 localStorage（使离线时能回退）
+                this.saveCurrentUserData();
+                console.log(`[records] 从后端同步了 ${backendRecords.length} 条记录`);
+            }
+        } catch (err) {
+            console.warn('[records] 后端同步失败，保留本地数据:', err.message);
+        }
     },
 
     saveCurrentUserData() {
@@ -381,10 +575,73 @@ const App = {
             collection: {},
             // 每日任务系统字段
             dailyTasks: null,
+            // 后端绑定
+            _backendId: null,
         };
         this.users[uid] = user;
         this.saveUsers();
         return uid;
+    },
+
+    /**
+     * 确保当前用户已绑定后端
+     * - 检查 user._backendId 是否存在
+     * - 不存在则调用后端注册，保存返回的 user.id
+     * - 持久化到 localStorage
+     * @returns {Promise<string>} 后端用户 ID (UUID)
+     */
+    async ensureBackendUser() {
+        const user = this.getCurrentUser();
+        if (!user) throw new Error('无当前用户');
+
+        // 已绑定，直接返回
+        if (user._backendId) return user._backendId;
+
+        // 未绑定，调用后端注册
+        try {
+            const res = await api.users.register({
+                name: user.name,
+                className: user.className,
+                studentId: 'baobei_' + user.id,
+                password: 'baobei123',
+            });
+            user._backendId = res.data.user.id;
+            this.saveUsers();
+            console.log(`[user] 已绑定后端用户: ${user.name} → ${user._backendId}`);
+            return user._backendId;
+        } catch (err) {
+            // 如果学号已存在（409），尝试用已有学号重新注册
+            if (err.code === 409) {
+                console.warn('[user] 学号冲突，尝试备用学号注册...');
+                const res = await api.users.register({
+                    name: user.name,
+                    className: user.className,
+                    studentId: 'baobei_' + user.id + '_' + Date.now(),
+                    password: 'baobei123',
+                });
+                user._backendId = res.data.user.id;
+                this.saveUsers();
+                console.log(`[user] 已绑定后端用户(备用): ${user.name} → ${user._backendId}`);
+                return user._backendId;
+            }
+            throw err;
+        }
+    },
+
+    /**
+     * 将记录异步同步到后端（双写）
+     * - 静默执行，失败不影响前端
+     * - 自动完成用户绑定（如未绑定）
+     * @param {Object} record - { drinkId, customBrand, customName, size, price, rating, note, date, time }
+     */
+    async _syncRecordToBackend(record) {
+        try {
+            const backendId = await this.ensureBackendUser();
+            await api.records.create(record, backendId);
+            console.log('[record] 后端同步成功');
+        } catch (err) {
+            console.warn('[record] 后端同步失败（不影响本地数据）:', err.message);
+        }
     },
 
     deleteUser(userId) {
@@ -669,13 +926,54 @@ const App = {
 
         saveBtn.addEventListener('click', () => this.saveDrinkRecord());
 
-        const drinkSelect = document.getElementById('drinkName');
-        drinkMenu.forEach(drink => {
-            const option = document.createElement('option');
-            option.value = drink.id;
-            option.textContent = drink.name;
-            drinkSelect.appendChild(option);
+        // 饮品类型切换
+        const typeBtns = document.querySelectorAll('.drink-type-btn');
+        const officialSection = document.getElementById('officialDrinkSection');
+        const customSection = document.getElementById('customDrinkSection');
+        let currentDrinkType = 'official';
+
+        typeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                typeBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentDrinkType = btn.dataset.type;
+                if (currentDrinkType === 'official') {
+                    officialSection.style.display = 'block';
+                    customSection.style.display = 'none';
+                } else {
+                    officialSection.style.display = 'none';
+                    customSection.style.display = 'block';
+                }
+            });
         });
+        // 保存 currentDrinkType 引用供 saveDrinkRecord 使用
+        this._getDrinkType = () => currentDrinkType;
+
+        const drinkSelect = document.getElementById('drinkName');
+        // 初始化品牌下拉框
+        this._refreshBrandSelect();
+        // 初始化饮品下拉框
+        this._refreshDrinkSelect();
+
+        // 品牌筛选联动：品牌变更 → 刷新饮品列表
+        const brandSelect = document.getElementById('drinkBrand');
+        if (brandSelect) {
+            brandSelect.addEventListener('change', () => {
+                this._refreshDrinkSelect();
+            });
+        }
+
+        // 搜索联动：输入搜索 → 防抖刷新饮品列表
+        const searchInput = document.getElementById('drinkSearch');
+        let searchTimer = null;
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                if (searchTimer) clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    this._refreshDrinkSelect();
+                }, 250);
+            });
+        }
 
         document.querySelectorAll('.size-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -745,14 +1043,34 @@ const App = {
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
 
+        // 重置为官方饮品模式
+        document.querySelectorAll('.drink-type-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.type === 'official');
+        });
+        document.getElementById('officialDrinkSection').style.display = 'block';
+        document.getElementById('customDrinkSection').style.display = 'none';
+
+        // 重置搜索和品牌筛选
+        const searchInput = document.getElementById('drinkSearch');
+        const brandSelect = document.getElementById('drinkBrand');
+        if (searchInput) searchInput.value = '';
+        if (brandSelect) brandSelect.value = '';
+
         document.getElementById('drinkName').value = '';
         document.getElementById('drinkCategory').value = 'coffee';
+        document.getElementById('customBrand').value = '';
+        document.getElementById('customName').value = '';
+        document.getElementById('customCategory').value = 'other';
         document.getElementById('drinkPrice').value = '';
         document.getElementById('drinkNote').value = '';
         document.querySelectorAll('.size-btn').forEach((b, i) => {
             b.classList.toggle('active', i === 1);
         });
         this.updateRatingStars(0);
+
+        // 刷新品牌和饮品下拉框
+        this._refreshBrandSelect();
+        this._refreshDrinkSelect();
     },
 
     closeAddDrinkModal() {
@@ -762,8 +1080,34 @@ const App = {
     },
 
     saveDrinkRecord() {
-        const drinkId = parseInt(document.getElementById('drinkName').value);
-        const category = document.getElementById('drinkCategory').value;
+        const isCustom = this._getDrinkType && this._getDrinkType() === 'custom';
+
+        let drinkId = null;
+        let customBrand = null;
+        let customName = null;
+        let category;
+        let drinkName = '';
+        let drink = null;
+
+        if (isCustom) {
+            // 自定义饮品
+            customBrand = document.getElementById('customBrand').value.trim();
+            customName = document.getElementById('customName').value.trim();
+            category = document.getElementById('customCategory').value;
+
+            if (!customBrand) { this.showToast('请输入品牌'); return; }
+            if (!customName) { this.showToast('请输入饮品名称'); return; }
+            drinkName = customBrand + ' - ' + customName;
+        } else {
+            // 官方饮品
+            drinkId = parseInt(document.getElementById('drinkName').value);
+            category = document.getElementById('drinkCategory').value;
+
+            if (!drinkId) { this.showToast('请选择饮品名称'); return; }
+            drink = this.drinks.find(d => d.id === drinkId);
+            drinkName = drink ? drink.name : '未知饮品';
+        }
+
         const sizeBtn = document.querySelector('.size-btn.active');
         const size = sizeBtn ? sizeBtn.dataset.size : 'medium';
         const price = parseFloat(document.getElementById('drinkPrice').value);
@@ -772,11 +1116,9 @@ const App = {
         const ratingStars = document.querySelectorAll('#ratingSelector i.fas');
         const rating = ratingStars.length;
 
-        if (!drinkId) { this.showToast('请选择饮品名称'); return; }
         if (!price || price <= 0) { this.showToast('请输入有效价格'); return; }
         if (rating === 0) { this.showToast('请给饮品评分'); return; }
 
-        const drink = drinkMenu.find(d => d.id === drinkId);
         const now = new Date();
         const dateStr = now.toISOString().split('T')[0];
         const timeStr = now.toTimeString().split(' ')[0].substring(0, 5);
@@ -784,7 +1126,9 @@ const App = {
         const newRecord = {
             id: this.nextRecordId++,
             drinkId: drinkId,
-            drinkName: drink ? drink.name : '未知饮品',
+            customBrand: customBrand,
+            customName: customName,
+            drinkName: drinkName,
             category: category,
             size: size,
             price: price,
@@ -800,6 +1144,13 @@ const App = {
         this.saveCurrentUserData();
 
         this.closeAddDrinkModal();
+
+        // 后端同步：双写记录（异步，不阻塞前端逻辑）
+        this._syncRecordToBackend({
+            drinkId, customBrand, customName,
+            size, price, rating, note: note || '',
+            date: dateStr, time: timeStr,
+        });
 
         // 图鉴系统：检查是否新饮品解锁
         let collectionResult = null;
@@ -1329,6 +1680,54 @@ const App = {
     getMonthStart() {
         const d = new Date();
         return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+    },
+
+    /**
+     * 获取记录的显示名称
+     * - 自定义饮品：customBrand + customName（如 "蜜雪冰城 - 柠檬水"）
+     * - 官方饮品：品牌 + 饮品名（如 "瑞幸咖啡\n生椰拿铁"）
+     * - fallback：直接用 drinkName
+     * @param {Object} record 记录对象
+     * @returns {{ brandLine: string, nameLine: string, isTwoLine: boolean }}
+     */
+    getDrinkDisplayName(record) {
+        // 自定义饮品
+        if (record.customBrand || record.customName) {
+            const brand = record.customBrand || '';
+            const name = record.customName || '';
+            return {
+                brandLine: brand,
+                nameLine: name,
+                isTwoLine: !!brand && !!name,
+            };
+        }
+        // 官方饮品：从 drinks/brands 查找品牌
+        if (record.drinkId) {
+            const drink = this.drinks.find(d => d.id === record.drinkId);
+            if (drink && drink.brandId && this.brands.length > 0) {
+                const brand = this.brands.find(b => b.id === drink.brandId);
+                if (brand) {
+                    return {
+                        brandLine: brand.name,
+                        nameLine: drink.name,
+                        isTwoLine: true,
+                    };
+                }
+            }
+            if (drink) {
+                return {
+                    brandLine: '',
+                    nameLine: drink.name,
+                    isTwoLine: false,
+                };
+            }
+        }
+        // fallback
+        return {
+            brandLine: '',
+            nameLine: record.drinkName || '未知饮品',
+            isTwoLine: false,
+        };
     },
 
     getGreeting() {

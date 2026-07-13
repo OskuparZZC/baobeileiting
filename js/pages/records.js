@@ -88,6 +88,11 @@ const Records = {
             ).join('');
 
             const sizeLabel = r.size === 'large' ? '大杯' : r.size === 'medium' ? '中杯' : '小杯';
+            const display = App.getDrinkDisplayName(r);
+
+            const nameHtml = display.isTwoLine
+                ? `<span class="record-brand">${display.brandLine}</span><span class="record-drink">${display.nameLine}</span>`
+                : `<span class="record-name-single">${display.nameLine}</span>`;
 
             return `
                 <div class="record-card card">
@@ -97,7 +102,7 @@ const Records = {
                         </div>
                         <div class="record-main">
                             <div class="flex-between">
-                                <span class="record-name">${r.drinkName}</span>
+                                <div class="record-name-block">${nameHtml}</div>
                                 <span class="record-price">¥${r.price}</span>
                             </div>
                             <div class="record-meta">
@@ -264,7 +269,22 @@ const Records = {
                 flex: 1;
                 min-width: 0;
             }
-            .record-name {
+            .record-name-block {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                min-width: 0;
+            }
+            .record-brand {
+                font-size: var(--font-size-xs);
+                color: var(--color-text-light);
+                font-weight: 500;
+            }
+            .record-drink {
+                font-weight: 600;
+                font-size: var(--font-size-lg);
+            }
+            .record-name-single {
                 font-weight: 600;
                 font-size: var(--font-size-lg);
             }

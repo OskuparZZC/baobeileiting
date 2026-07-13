@@ -116,22 +116,69 @@
                 </button>
             </div>
             <div class="modal-body">
+                <!-- 饮品类型切换 -->
                 <div class="form-group">
-                    <label>饮品名称</label>
-                    <select id="drinkName" class="form-select">
-                        <option value="">选择饮品...</option>
-                    </select>
+                    <div class="drink-type-toggle">
+                        <button class="drink-type-btn active" data-type="official">官方饮品</button>
+                        <button class="drink-type-btn" data-type="custom">自定义饮品</button>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>饮品分类</label>
-                    <select id="drinkCategory" class="form-select">
-                        <option value="coffee">咖啡</option>
-                        <option value="tea">茶饮</option>
-                        <option value="milk_tea">奶茶</option>
-                        <option value="juice">果汁</option>
-                        <option value="soda">汽水</option>
-                        <option value="other">其他</option>
-                    </select>
+
+                <!-- 官方饮品区域 -->
+                <div id="officialDrinkSection">
+                    <div class="form-group">
+                        <label>搜索饮品</label>
+                        <div class="drink-search-wrapper">
+                            <i class="fas fa-search drink-search-icon"></i>
+                            <input type="text" id="drinkSearch" class="form-input drink-search-input" placeholder="输入名称搜索..." autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>品牌筛选</label>
+                        <select id="drinkBrand" class="form-select">
+                            <option value="">全部品牌</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>饮品名称</label>
+                        <select id="drinkName" class="form-select">
+                            <option value="">选择饮品...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>饮品分类</label>
+                        <select id="drinkCategory" class="form-select">
+                            <option value="coffee">咖啡</option>
+                            <option value="tea">茶饮</option>
+                            <option value="milk_tea">奶茶</option>
+                            <option value="juice">果汁</option>
+                            <option value="soda">汽水</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 自定义饮品区域 -->
+                <div id="customDrinkSection" style="display:none;">
+                    <div class="form-group">
+                        <label>品牌</label>
+                        <input type="text" id="customBrand" class="form-input" placeholder="如：学校奶茶店、瑞幸咖啡...">
+                    </div>
+                    <div class="form-group">
+                        <label>饮品名称</label>
+                        <input type="text" id="customName" class="form-input" placeholder="如：杨枝甘露、生椰拿铁...">
+                    </div>
+                    <div class="form-group">
+                        <label>分类（可选）</label>
+                        <select id="customCategory" class="form-select">
+                            <option value="other">其他</option>
+                            <option value="coffee">咖啡</option>
+                            <option value="tea">茶饮</option>
+                            <option value="milk_tea">奶茶</option>
+                            <option value="juice">果汁</option>
+                            <option value="soda">汽水</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>容量</label>
@@ -167,6 +214,7 @@
     </div>
 
     <script src="js/data.js"></script>
+    <script src="js/api.js"></script>
     <script src="js/ai-recommend.js"></script>
     <script src="js/help-data.js"></script>
     <script src="js/app.js"></script>
