@@ -49,6 +49,8 @@ const App = {
         this.loadCurrentUserData();
         // 3b. 从后端同步记录（异步，不阻塞 UI）
         this.syncRecordsFromBackend().catch(err => console.warn('[init] 记录同步异常:', err.message));
+        // 3c. 从后端同步图鉴（异步，不阻塞 UI）
+        this.syncCollectionFromBackend().catch(err => console.warn('[init] 图鉴同步异常:', err.message));
         // 4. 同步通知徽标（必须在 loadCurrentUserData 之后）
         this.updateNotificationBadge();
         // 5. 初始化每日任务系统（必须在 checkLoginStreak 之前，否则登录任务无法被标记）
@@ -394,6 +396,58 @@ const App = {
             }
         } catch (err) {
             console.warn('[records] 后端同步失败，保留本地数据:', err.message);
+        }
+    },
+
+    /**
+     * 从后端同步图鉴数据到前端
+     * - 异步执行，不阻塞页面初始化
+     * - 成功则合并后端数据到本地 collection（不覆盖已有数据）
+     * - 合并规则：timesTried 取较大值，unlockedAt 取较早日期
+     * - 失败则保留 localStorage 现有数据
+     */
+    async syncCollectionFromBackend() {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) {
+            console.log('[collection] 未绑定后端用户，跳过同步');
+            return;
+        }
+
+        try {
+            const res = await api.collections.me(user._backendId);
+            if (res.data && Array.isArray(res.data.collections)) {
+                // 确保本地 collection 存在
+                if (!user.collection || typeof user.collection !== 'object') {
+                    user.collection = {};
+                }
+
+                let mergedCount = 0;
+                res.data.collections.forEach(c => {
+                    const key = String(c.drinkId);
+                    const existing = user.collection[key];
+
+                    if (existing) {
+                        // 已存在：合并 — timesTried 取较大值，unlockedAt 取较早日期
+                        existing.timesTried = Math.max(existing.timesTried || 1, c.timesTried || 1);
+                        if (c.unlockedAt && (!existing.unlockedAt || c.unlockedAt < existing.unlockedAt)) {
+                            existing.unlockedAt = c.unlockedAt;
+                        }
+                    } else {
+                        // 新条目：直接写入
+                        user.collection[key] = {
+                            unlockedAt: c.unlockedAt || '',
+                            timesTried: c.timesTried || 1,
+                        };
+                        mergedCount++;
+                    }
+                });
+
+                this.saveUsers();
+                const totalKeys = Object.keys(user.collection).length;
+                console.log(`[collection] 从后端同步了 ${res.data.collections.length} 个图鉴条目（新增 ${mergedCount}，总计 ${totalKeys}）`);
+            }
+        } catch (err) {
+            console.warn('[collection] 后端同步失败，保留本地数据:', err.message);
         }
     },
 
@@ -1448,6 +1502,11 @@ const App = {
             // 已解锁，增加尝试次数
             user.collection[drinkId].timesTried = (user.collection[drinkId].timesTried || 1) + 1;
             this.saveUsers();
+            // 后端同步（异步，fire-and-forget）
+            if (user._backendId) {
+                api.collections.unlock({ drinkId, unlockedAt: dateStr }, user._backendId)
+                    .catch(err => console.warn('[collection] 后端同步失败:', err.message));
+            }
             return { isNew: false };
         }
 
@@ -1457,7 +1516,29 @@ const App = {
             timesTried: 1,
         };
         this.saveUsers();
+        // 后端同步（异步，fire-and-forget）
+        if (user._backendId) {
+            api.collections.unlock({ drinkId, unlockedAt: dateStr }, user._backendId)
+                .catch(err => console.warn('[collection] 后端同步失败:', err.message));
+        }
         return { isNew: true, drinkName };
+    },
+
+    /**
+     * 将后端饮品数据标准化为前端统一格式
+     * 后端 drinks 表字段：id, name, category, basePrice (model 已转), icon
+     * 本地 drinkMenu 字段：id, name, category, basePrice
+     * 确保 category 在 categoryMap 中有对应条目，否则 fallback 到 'other'
+     */
+    _normalizeDrinkForCollection(drink) {
+        if (!drink) return null;
+        const category = categoryMap[drink.category] ? drink.category : 'other';
+        return {
+            id: drink.id,
+            name: drink.name,
+            category: category,
+            basePrice: Number(drink.basePrice || drink.base_price || 0),
+        };
     },
 
     // 获取当前用户的图鉴数据
@@ -1466,14 +1547,17 @@ const App = {
         if (!user) return { unlockedCount: 0, totalCount: 0, unlockedList: [], lockedList: [], progressPercent: 0, title: '' };
 
         const collection = user.collection || {};
-        const totalCount = drinkMenu.length;
+        // 优先使用后端加载的饮品列表，后端不可用时 fallback 到本地 drinkMenu
+        const rawDrinks = this.drinks && this.drinks.length > 0 ? this.drinks : drinkMenu;
+        const allDrinks = rawDrinks.map(d => this._normalizeDrinkForCollection(d));
+        const totalCount = allDrinks.length;
         const unlockedIds = Object.keys(collection);
         const unlockedCount = unlockedIds.length;
         const progressPercent = totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0;
 
         // 构建已解锁列表（按解锁时间倒序）
         const unlockedList = unlockedIds.map(did => {
-            const drink = drinkMenu.find(d => d.id === parseInt(did));
+            const drink = allDrinks.find(d => d.id === parseInt(did));
             const entry = collection[did];
             return {
                 drinkId: parseInt(did),
@@ -1488,7 +1572,7 @@ const App = {
 
         // 构建未解锁列表（按品类分组排序）
         const unlockedIdSet = new Set(unlockedIds.map(id => parseInt(id)));
-        const lockedList = drinkMenu
+        const lockedList = allDrinks
             .filter(d => !unlockedIdSet.has(d.id))
             .map(d => ({
                 drinkId: d.id,
@@ -1511,16 +1595,18 @@ const App = {
         // 按品类统计
         const categoryStats = {};
         unlockedList.forEach(d => {
-            if (!categoryStats[d.category]) {
-                categoryStats[d.category] = { unlocked: 0, total: 0, info: categoryMap[d.category] };
+            const cat = d.category;
+            if (!categoryStats[cat]) {
+                categoryStats[cat] = { unlocked: 0, total: 0, info: categoryMap[cat] || categoryMap['other'] };
             }
-            categoryStats[d.category].unlocked++;
+            categoryStats[cat].unlocked++;
         });
-        drinkMenu.forEach(d => {
-            if (!categoryStats[d.category]) {
-                categoryStats[d.category] = { unlocked: 0, total: 0, info: categoryMap[d.category] };
+        allDrinks.forEach(d => {
+            const cat = d.category;
+            if (!categoryStats[cat]) {
+                categoryStats[cat] = { unlocked: 0, total: 0, info: categoryMap[cat] || categoryMap['other'] };
             }
-            categoryStats[d.category].total++;
+            categoryStats[cat].total++;
         });
 
         return {
@@ -1663,7 +1749,7 @@ const App = {
     },
 
     formatPrice(price) {
-        return '¥' + price.toFixed(2);
+        return '¥' + Number(price || 0).toFixed(2);
     },
 
     getTodayStr() {

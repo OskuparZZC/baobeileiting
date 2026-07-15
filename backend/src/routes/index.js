@@ -12,6 +12,7 @@ const recordsRouter = require('./records');
 const drinksRouter = require('./drinks');
 const bountiesRouter = require('./bounties');
 const leaderboardRouter = require('./leaderboard');
+const collectionsRouter = require('./collections');
 
 // 挂载路由
 router.use('/health', healthRouter);
@@ -20,5 +21,6 @@ router.use('/records', recordsRouter);
 router.use('/drinks', drinksRouter);
 router.use('/bounties', bountiesRouter);
 router.use('/leaderboard', leaderboardRouter);
+router.use('/collections', collectionsRouter);
 
 module.exports = router;

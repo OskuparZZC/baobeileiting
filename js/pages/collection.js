@@ -172,7 +172,8 @@ const Collection = {
 
     renderDetail(container, data) {
         const did = this.detailDrinkId;
-        const drink = drinkMenu.find(d => d.id === did);
+        const allDrinks = App.drinks && App.drinks.length > 0 ? App.drinks : drinkMenu;
+        const drink = allDrinks.find(d => d.id === did);
         const catInfo = drink ? App.getCategoryInfo(drink.category) : App.getCategoryInfo('other');
         const collection = data.unlockedList.find(d => d.drinkId === did);
 

@@ -114,6 +114,29 @@ const api = {
     },
   },
 
+  // ==================== 图鉴 ====================
+
+  collections: {
+    /**
+     * 获取当前用户图鉴
+     * @param {string} xUserId
+     * @returns {Object} { code, message, data: { collections: [...], count: N } }
+     */
+    me(xUserId) {
+      return api.get('/collections/me', { xUserId });
+    },
+
+    /**
+     * 解锁/更新图鉴条目（幂等）
+     * @param {Object} data - { drinkId, unlockedAt }
+     * @param {string} xUserId
+     * @returns {Object} { code, message, data }
+     */
+    unlock(data, xUserId) {
+      return api.post('/collections/unlock', data, { xUserId });
+    },
+  },
+
 };
 
 // 挂载到 window，方便调试
