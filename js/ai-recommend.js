@@ -298,8 +298,8 @@ const AIRecommendEngine = {
             ? pick.reasons[0]
             : '根据你的口味偏好智能推荐';
 
-        // 计算匹配置信度
-        const confidence = Math.min(98, Math.round(pick.score * 1.2 + 55));
+        // 计算匹配置信度（上限 100%，避免环形进度条视觉上像"加载卡住"）
+        const confidence = Math.min(100, Math.round(pick.score * 1.2 + 55));
 
         // 生成匹配标签
         const matchTags = [];
@@ -340,19 +340,30 @@ const AIRecommendEngine = {
 
     /**
      * 获取推荐结果（供外部调用）
+     * 始终返回有效结果，即使数据为空也通过冷启动兜底
      */
     getRecommendation() {
-        return this.analyze(App.records, drinkMenu);
+        try {
+            return this.analyze(App.records, drinkMenu);
+        } catch (e) {
+            console.warn('AI 推荐生成失败，使用冷启动兜底:', e);
+            return this._coldStartRecommend(drinkMenu);
+        }
     },
 
     /**
      * 刷新推荐（加入随机种子，可得到不同结果）
      */
     refreshRecommendation() {
-        // 通过随机种子扰动，获得不同推荐
-        const shuffled = [...App.records].sort(() => Math.random() - 0.5);
-        const subset = shuffled.slice(0, Math.max(3, Math.floor(shuffled.length * 0.7)));
-        return this.analyze(subset, drinkMenu);
+        try {
+            // 通过随机种子扰动，获得不同推荐
+            const shuffled = [...App.records].sort(() => Math.random() - 0.5);
+            const subset = shuffled.slice(0, Math.max(3, Math.floor(shuffled.length * 0.7)));
+            return this.analyze(subset, drinkMenu);
+        } catch (e) {
+            console.warn('AI 推荐刷新失败，使用冷启动兜底:', e);
+            return this._coldStartRecommend(drinkMenu);
+        }
     },
 
     /**
@@ -419,7 +430,7 @@ const AIRecommendEngine = {
             spendingAnalysis: null,
             ratingAnalysis: null,
             timeAnalysis: null,
-            collectionAnalysis: { unlockedCount: 0, totalCount: drinkMenu.length, progressPercent: 0, title: '探索者' },
+            collectionAnalysis: { unlockedCount: 0, totalCount: this._getFullDrinkMenu().length, progressPercent: 0, title: '探索者' },
             sizeAnalysis: null,
             aiAdvice: [
                 { icon: 'fa-compass', text: '从热门饮品开始尝试，找到你的口味偏好' },
@@ -564,9 +575,15 @@ const AIRecommendEngine = {
         };
     },
 
+    // 获取完整饮品菜单（优先后端数据，fallback 本地）
+    _getFullDrinkMenu() {
+        return (App.drinks && App.drinks.length > 0) ? App.drinks : drinkMenu;
+    },
+
     // 图鉴分析
     _collectionAnalysis(collection) {
-        const totalCount = drinkMenu.length;
+        const fullMenu = this._getFullDrinkMenu();
+        const totalCount = fullMenu.length;
         const unlockedCount = collection ? Object.keys(collection).length : 0;
         const progressPercent = totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0;
 
@@ -580,9 +597,9 @@ const AIRecommendEngine = {
         // 按品类统计解锁情况
         const byCategory = {};
         Object.keys(categoryMap).forEach(key => {
-            const total = drinkMenu.filter(d => d.category === key).length;
+            const total = fullMenu.filter(d => d.category === key).length;
             const unlocked = collection
-                ? drinkMenu.filter(d => d.category === key && collection[d.id]).length
+                ? fullMenu.filter(d => d.category === key && collection[d.id]).length
                 : 0;
             byCategory[key] = { total, unlocked, catInfo: categoryMap[key] };
         });
@@ -710,7 +727,8 @@ const AIRecommendEngine = {
         // 基于品类偏好的建议
         const topCat = catAnalysis.topCategory;
         if (topCat && topCat.count > 0) {
-            const otherDrinks = drinkMenu.filter(d => d.category === topCat.category);
+            const fullMenu = this._getFullDrinkMenu();
+            const otherDrinks = fullMenu.filter(d => d.category === topCat.category);
             const triedIds = new Set();
             // 需要从外部获取已尝试的ID，这里用简单估算
             const untriedInFav = otherDrinks.length;

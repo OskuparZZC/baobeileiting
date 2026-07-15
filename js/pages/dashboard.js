@@ -372,10 +372,15 @@ const Dashboard = {
     },
 
     renderAIRecommendCard(aiRec) {
+        // 防御：确保 aiRec 始终有有效数据
+        if (!aiRec || !aiRec.drink || !aiRec.categoryInfo) {
+            aiRec = AIRecommendEngine._coldStartRecommend(drinkMenu);
+        }
         const drink = aiRec.drink;
         const cat = aiRec.categoryInfo;
-        const confidenceColor = aiRec.confidence >= 85 ? '#5B8C5A' : aiRec.confidence >= 70 ? '#D4953A' : '#8B7355';
-        const confidenceLabel = aiRec.confidence >= 85 ? '强烈推荐' : aiRec.confidence >= 70 ? '推荐' : '值得一试';
+        const confidence = aiRec.confidence || 75;
+        const confidenceColor = confidence >= 85 ? '#5B8C5A' : confidence >= 70 ? '#D4953A' : '#8B7355';
+        const confidenceLabel = confidence >= 85 ? '强烈推荐' : confidence >= 70 ? '推荐' : '值得一试';
 
         return `
             <div class="card ai-recommend-card">
@@ -395,22 +400,12 @@ const Dashboard = {
                         <div class="ai-drink-icon" style="background: linear-gradient(135deg, ${cat.color}20, ${cat.color}40);">
                             <i class="fas ${cat.icon}" style="color: ${cat.color};"></i>
                         </div>
-                        <div class="ai-confidence-ring">
-                            <svg viewBox="0 0 60 60" class="ai-ring-svg">
-                                <circle cx="30" cy="30" r="26" fill="none" stroke="#E8D5C4" stroke-width="4"/>
-                                <circle cx="30" cy="30" r="26" fill="none" stroke="${confidenceColor}" stroke-width="4"
-                                    stroke-dasharray="${aiRec.confidence * 1.63} 163"
-                                    stroke-linecap="round" transform="rotate(-90 30 30)"
-                                    class="ai-ring-progress"/>
-                            </svg>
-                            <span class="ai-confidence-text">${aiRec.confidence}%</span>
-                        </div>
                     </div>
                     <div class="ai-drink-info">
                         <h3 class="ai-drink-name">${drink.name}</h3>
                         <div class="ai-drink-meta-row">
                             <span class="tag tag-${drink.category}">${cat.label}</span>
-                            <span class="ai-confidence-label" style="color: ${confidenceColor};">${confidenceLabel}</span>
+                            <span class="ai-confidence-badge" style="background: ${confidenceColor}; color: #fff;">${confidenceLabel} · ${confidence}%</span>
                         </div>
                         <span class="ai-drink-price">约 ¥${drink.basePrice}</span>
                     </div>
@@ -575,14 +570,10 @@ const Dashboard = {
             .ai-drink-showcase { display: flex; align-items: center; gap: var(--spacing-lg); margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: rgba(255,255,255,0.7); border-radius: 14px; }
             .ai-drink-icon-wrapper { position: relative; flex-shrink: 0; }
             .ai-drink-icon { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
-            .ai-confidence-ring { position: absolute; top: -6px; right: -6px; width: 60px; height: 60px; }
-            .ai-ring-svg { width: 100%; height: 100%; }
-            .ai-ring-progress { transition: stroke-dasharray 0.8s ease; }
-            .ai-confidence-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 11px; font-weight: 700; color: var(--color-text); }
             .ai-drink-info { display: flex; flex-direction: column; gap: 4px; }
             .ai-drink-name { font-size: var(--font-size-xl); font-weight: 700; color: var(--color-text); }
             .ai-drink-meta-row { display: flex; align-items: center; gap: var(--spacing-sm); }
-            .ai-confidence-label { font-size: var(--font-size-xs); font-weight: 700; }
+            .ai-confidence-badge { font-size: var(--font-size-xs); font-weight: 700; padding: 3px 10px; border-radius: 12px; white-space: nowrap; }
             .ai-drink-price { font-size: var(--font-size-sm); color: var(--color-primary); font-weight: 600; }
             .ai-reason-section { margin-bottom: var(--spacing-md); }
             .ai-reason-main { display: flex; align-items: flex-start; gap: var(--spacing-sm); padding: var(--spacing-md); background: linear-gradient(135deg, #FFF8E7, #FFF0D4); border-radius: 10px; border-left: 3px solid #D4953A; margin-bottom: var(--spacing-md); }

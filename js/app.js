@@ -83,20 +83,23 @@ const App = {
     async loadDrinks() {
         if (this._drinksLoading) return;
         this._drinksLoading = true;
-        try {
-            const res = await api.drinks.list();
-            if (res.data && res.data.length > 0) {
-                this.drinks = res.data;
-                console.log(`[drinks] 已从后端加载 ${this.drinks.length} 款饮品`);
-                this._refreshDrinkSelect();
-                return;
+        this._drinksReadyPromise = (async () => {
+            try {
+                const res = await api.drinks.list();
+                if (res.data && res.data.length > 0) {
+                    this.drinks = res.data;
+                    console.log(`[drinks] 已从后端加载 ${this.drinks.length} 款饮品`);
+                    this._refreshDrinkSelect();
+                    return;
+                }
+            } catch (e) {
+                console.warn('[drinks] 后端加载失败，使用本地 fallback:', e.message);
+            } finally {
+                this._drinksLoading = false;
             }
-        } catch (e) {
-            console.warn('[drinks] 后端加载失败，使用本地 fallback:', e.message);
-        } finally {
-            this._drinksLoading = false;
-        }
-        this.drinks = drinkMenu;
+            this.drinks = drinkMenu;
+        })();
+        return this._drinksReadyPromise;
     },
 
     /**
@@ -329,7 +332,13 @@ const App = {
     loadCurrentUserData() {
         const user = this.getCurrentUser();
         if (!user) return;
-        this.records = JSON.parse(JSON.stringify(user.records || []));
+        this.records = (user.records || []).map(r => ({
+            ...r,
+            price: Number(r.price || 0),
+            rating: Number(r.rating || 0),
+            date: this._normalizeDateField(r.date),
+            time: this._normalizeTimeField(r.time),
+        }));
         this.nextRecordId = user.nextRecordId || (this.records.length + 1);
         this.notificationCount = user.notificationCount || 0;
         // 社区帖子是共享的
@@ -355,7 +364,8 @@ const App = {
         } else if (record.drinkId) {
             // 官方饮品：从 this.drinks（后端加载）或 drinkMenu（本地 fallback）查找
             const allDrinks = this.drinks.length > 0 ? this.drinks : drinkMenu;
-            const drink = allDrinks.find(d => d.id === record.drinkId);
+            const rid = Number(record.drinkId);
+            const drink = allDrinks.find(d => Number(d.id) === rid);
             if (drink) {
                 drinkName = drink.name;
                 category = drink.category;
@@ -366,7 +376,41 @@ const App = {
             ...record,
             drinkName,
             category,
+            price: Number(record.price || 0),
+            rating: Number(record.rating || 0),
+            date: this._normalizeDateField(record.date),
+            time: this._normalizeTimeField(record.time),
         };
+    },
+
+    /**
+     * 标准化日期字段为 YYYY-MM-DD 格式
+     * 兼容：Date 对象、ISO 字符串、"YYYY-MM-DD" 字符串、空值
+     */
+    _normalizeDateField(val) {
+        if (!val) return '';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    },
+
+    /**
+     * 标准化时间字段为 HH:mm 格式
+     * 兼容：Date 对象、ISO 字符串、"HH:mm:ss"、"HH:mm" 格式、空值
+     */
+    _normalizeTimeField(val) {
+        if (!val) return '';
+        const str = String(val);
+        // 已经是 "HH:mm" 或 "HH:mm:ss" 格式
+        if (/^\d{2}:\d{2}/.test(str)) return str.substring(0, 5);
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return str;
+        const h = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${h}:${min}`;
     },
 
     /**
@@ -382,6 +426,9 @@ const App = {
             return;
         }
 
+        // 等待饮品数据加载完成，确保 _normalizeBackendRecord 能正确匹配 drinkName 和 category
+        await this._waitForDrinks();
+
         try {
             const res = await api.records.me(user._backendId);
             if (res.data && Array.isArray(res.data.records)) {
@@ -396,6 +443,24 @@ const App = {
             }
         } catch (err) {
             console.warn('[records] 后端同步失败，保留本地数据:', err.message);
+        }
+    },
+
+    /**
+     * 等待饮品数据加载完成（最多等 10 秒）
+     * @returns {Promise<void>}
+     */
+    async _waitForDrinks() {
+        if (!this._drinksReadyPromise) {
+            this._drinksReadyPromise = this.loadDrinks();
+        }
+        try {
+            await Promise.race([
+                this._drinksReadyPromise,
+                new Promise(resolve => setTimeout(resolve, 10000))
+            ]);
+        } catch (e) {
+            console.warn('[drinks] 饮品加载超时，使用已有数据继续');
         }
     },
 
@@ -1537,6 +1602,7 @@ const App = {
             id: drink.id,
             name: drink.name,
             category: category,
+            brandId: drink.brandId || null,
             basePrice: Number(drink.basePrice || drink.base_price || 0),
         };
     },
@@ -1559,9 +1625,15 @@ const App = {
         const unlockedList = unlockedIds.map(did => {
             const drink = allDrinks.find(d => d.id === parseInt(did));
             const entry = collection[did];
+            let brandName = '';
+            if (drink && drink.brandId && this.brands.length > 0) {
+                const brand = this.brands.find(b => Number(b.id) === Number(drink.brandId));
+                if (brand) brandName = brand.name;
+            }
             return {
                 drinkId: parseInt(did),
                 drinkName: drink ? drink.name : '未知饮品',
+                brandName,
                 category: drink ? drink.category : 'other',
                 basePrice: drink ? drink.basePrice : 0,
                 unlockedAt: entry.unlockedAt,
@@ -1574,13 +1646,21 @@ const App = {
         const unlockedIdSet = new Set(unlockedIds.map(id => parseInt(id)));
         const lockedList = allDrinks
             .filter(d => !unlockedIdSet.has(d.id))
-            .map(d => ({
-                drinkId: d.id,
-                drinkName: d.name,
-                category: d.category,
-                basePrice: d.basePrice,
-                isUnlocked: false,
-            }))
+            .map(d => {
+                let brandName = '';
+                if (d.brandId && this.brands.length > 0) {
+                    const brand = this.brands.find(b => Number(b.id) === Number(d.brandId));
+                    if (brand) brandName = brand.name;
+                }
+                return {
+                    drinkId: d.id,
+                    drinkName: d.name,
+                    brandName,
+                    category: d.category,
+                    basePrice: d.basePrice,
+                    isUnlocked: false,
+                };
+            })
             .sort((a, b) => a.category.localeCompare(b.category) || a.drinkName.localeCompare(b.drinkName));
 
         // 收集称号
@@ -1789,9 +1869,11 @@ const App = {
         }
         // 官方饮品：从 drinks/brands 查找品牌
         if (record.drinkId) {
-            const drink = this.drinks.find(d => d.id === record.drinkId);
+            const allDrinks = this.drinks && this.drinks.length > 0 ? this.drinks : drinkMenu;
+            const rid = Number(record.drinkId);
+            const drink = allDrinks.find(d => Number(d.id) === rid);
             if (drink && drink.brandId && this.brands.length > 0) {
-                const brand = this.brands.find(b => b.id === drink.brandId);
+                const brand = this.brands.find(b => Number(b.id) === Number(drink.brandId));
                 if (brand) {
                     return {
                         brandLine: brand.name,

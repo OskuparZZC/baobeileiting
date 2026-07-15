@@ -84,7 +84,10 @@ const Collection = {
                         <i class="fas ${catInfo.icon}"></i>
                     </div>
                     <div class="collection-card-info">
-                        <div class="collection-card-name">${d.drinkName}</div>
+                        <div class="collection-card-name">
+                            ${d.brandName ? `<span class="collection-card-brand">${d.brandName}</span>` : ''}
+                            <span>${d.drinkName}</span>
+                        </div>
                         <div class="collection-card-meta">
                             <span class="collection-card-tag" style="color: ${catInfo.color}; background: ${catInfo.color}15;">
                                 ${catInfo.label}
@@ -177,6 +180,13 @@ const Collection = {
         const catInfo = drink ? App.getCategoryInfo(drink.category) : App.getCategoryInfo('other');
         const collection = data.unlockedList.find(d => d.drinkId === did);
 
+        // 获取品牌名称
+        let brandName = '';
+        if (drink && drink.brandId && App.brands.length > 0) {
+            const brand = App.brands.find(b => Number(b.id) === Number(drink.brandId));
+            if (brand) brandName = brand.name;
+        }
+
         // 获取该饮品的统计
         const records = App.records.filter(r => r.drinkId === did);
         const avgRating = records.length > 0
@@ -199,6 +209,7 @@ const Collection = {
                     <span class="detail-category-tag">${catInfo.label}</span>
                 </div>
                 <div class="detail-info-section">
+                    ${brandName ? `<div class="detail-brand-name"><i class="fas fa-store"></i> ${brandName}</div>` : ''}
                     <h2 class="detail-drink-name">${drink ? drink.name : '未知饮品'}</h2>
                     ${collection ? `<p class="detail-unlock-date"><i class="fas fa-calendar-star"></i> ${collection.unlockedAt} 首次发现</p>` : ''}
                     <div class="detail-stats-grid">
@@ -511,6 +522,21 @@ const Collection = {
                 font-weight: 600;
                 color: #333;
                 margin-bottom: 4px;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .collection-card-brand {
+                font-size: 11px;
+                font-weight: 500;
+                color: #999;
+                display: flex;
+                align-items: center;
+                gap: 3px;
+            }
+            .collection-card-brand::before {
+                content: '🏪';
+                font-size: 10px;
             }
             .collection-card-name.locked-name {
                 color: #bbb;
@@ -631,6 +657,19 @@ const Collection = {
                 font-weight: 700;
                 color: #333;
                 margin-bottom: 6px;
+            }
+            .detail-brand-name {
+                font-size: 13px;
+                color: #8B5E3C;
+                margin-bottom: 4px;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                font-weight: 500;
+            }
+            .detail-brand-name i {
+                color: #D4953A;
+                font-size: 12px;
             }
             .detail-unlock-date {
                 font-size: 13px;
