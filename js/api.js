@@ -133,6 +133,24 @@ const api = {
     },
   },
 
+  // ==================== 排行榜 ====================
+
+  leaderboard: {
+    /**
+     * 获取排行榜数据
+     * @param {Object} options - { limit?: number }
+     * @returns {Object} { code, message, data: { entries, currentUser, total } }
+     */
+    async get(options = {}) {
+      let limit = Number(options.limit) || 50;
+      limit = Math.max(1, Math.min(100, Math.floor(limit)));
+      // 自动携带当前用户 x-user-id（如果已绑定）
+      const user = (typeof App !== 'undefined' && App.getCurrentUser) ? App.getCurrentUser() : null;
+      const xUserId = user && user._backendId ? user._backendId : undefined;
+      return api.get(`/leaderboard?limit=${limit}`, { xUserId });
+    },
+  },
+
   // ==================== 图鉴 ====================
 
   collections: {

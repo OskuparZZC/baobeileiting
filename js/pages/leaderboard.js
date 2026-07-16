@@ -3,7 +3,34 @@
 const Leaderboard = {
     currentTab: 'total',
 
+    /**
+     * 判断当前是否使用后端真实数据
+     * 条件：leaderboardData 存在且 source === 'backend'
+     */
+    _isBackendMode() {
+        return !!(App.leaderboardData && App.leaderboardData.source === 'backend');
+    },
+
+    /**
+     * 判断是否正在加载后端排行榜
+     */
+    _isLoading() {
+        return !!App.leaderboardLoading;
+    },
+
+    /**
+     * 判断后端是否返回了空数组
+     */
+    _isEmptyBackend() {
+        const d = App.leaderboardData;
+        return d && d.source === 'backend' && Array.isArray(d.entries) && d.entries.length === 0;
+    },
+
     render(container) {
+        const isBackend = this._isBackendMode();
+        const isLoading = this._isLoading();
+        const isEmpty = this._isEmptyBackend();
+
         container.innerHTML = `
             <!-- 页面标题 -->
             <div class="page-header mb-lg">
@@ -11,6 +38,19 @@ const Leaderboard = {
                 <p class="text-secondary">看看谁是校园饮品王！</p>
             </div>
 
+            ${isBackend ? '' : this._renderTabs()}
+
+            ${this._renderContent()}
+        `;
+
+        if (!isBackend) {
+            this.bindTabs();
+        }
+        this.addStyles();
+    },
+
+    _renderTabs() {
+        return `
             <!-- Tab切换 -->
             <div class="tab-bar mb-lg">
                 <button class="tab-btn ${this.currentTab === 'total' ? 'active' : ''}" data-tab="total">
@@ -20,7 +60,33 @@ const Leaderboard = {
                     <i class="fas fa-calendar-week"></i> 本周
                 </button>
             </div>
+        `;
+    },
 
+    _renderContent() {
+        const isLoading = this._isLoading();
+        const isEmpty = this._isEmptyBackend();
+
+        if (isLoading) {
+            return `
+                <div class="leaderboard-loading">
+                    <div class="loading-spinner"></div>
+                    <p class="text-secondary">正在加载排行榜...</p>
+                </div>
+            `;
+        }
+
+        if (isEmpty) {
+            return `
+                <div class="leaderboard-empty">
+                    <i class="fas fa-trophy" style="font-size:48px;color:var(--color-border);"></i>
+                    <p style="color:var(--color-text-light);margin-top:12px;">暂无排行数据</p>
+                    <p style="font-size:var(--font-size-xs);color:var(--color-text-light);">快去记录饮品，成为榜单第一吧！</p>
+                </div>
+            `;
+        }
+
+        return `
             <!-- 前三名 -->
             <div class="top-three mb-lg">
                 ${this.renderTopThree()}
@@ -31,9 +97,6 @@ const Leaderboard = {
                 ${this.renderLeaderboardList()}
             </div>
         `;
-
-        this.bindTabs();
-        this.addStyles();
     },
 
     getData() {
@@ -164,6 +227,10 @@ const Leaderboard = {
             .lb-stats { text-align: right; display: flex; flex-direction: column; gap: 2px; }
             .lb-cups { font-weight: 700; color: var(--color-primary); font-size: var(--font-size-md); }
             .lb-level { font-size: var(--font-size-xs); color: var(--color-accent); }
+            .leaderboard-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 16px; }
+            .loading-spinner { width: 36px; height: 36px; border: 3px solid var(--color-border); border-top-color: var(--color-primary); border-radius: 50%; animation: lb-spin 0.8s linear infinite; }
+            @keyframes lb-spin { to { transform: rotate(360deg); } }
+            .leaderboard-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; }
         `;
         document.head.appendChild(style);
     }

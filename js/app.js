@@ -13,6 +13,11 @@ const App = {
     // 用户系统
     currentUserId: null,
     users: {},
+    // 排行榜后端数据缓存
+    leaderboardData: null,
+    leaderboardLoading: false,
+    leaderboardError: null,
+
     // 兼容旧代码：动态获取当前用户信息
     get userProfile() {
         const u = this.getCurrentUser();
@@ -657,6 +662,13 @@ const App = {
                 await this.syncUserStatsFromBackend();
             }
         }
+
+        // 7. 同步排行榜（失败不影响其他同步，不阻塞页面）
+        try {
+            await this.syncLeaderboardFromBackend();
+        } catch (err) {
+            console.warn('[init] 排行榜同步失败（不影响其他功能）:', err.message);
+        }
     },
 
     /**
@@ -1179,7 +1191,107 @@ const App = {
     },
 
     // ===== 排行榜数据 =====
+
+    /**
+     * 从后端同步排行榜数据
+     * - 失败不阻塞，leaderboardData 保持 null 则使用本地 fallback
+     * - 不触发 XP、不调用 location.reload()
+     */
+    async syncLeaderboardFromBackend() {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) {
+            console.log('[leaderboard] 未绑定后端用户，跳过排行榜同步');
+            return;
+        }
+
+        if (this.leaderboardLoading) return;
+        this.leaderboardLoading = true;
+        this.leaderboardError = null;
+
+        try {
+            const res = await api.leaderboard.get({ limit: 50 });
+
+            if (!res.data || !Array.isArray(res.data.entries)) {
+                console.warn('[leaderboard] 后端返回数据格式异常');
+                return;
+            }
+
+            // normalize 每一项数字字段
+            const entries = res.data.entries.map(entry => ({
+                rank: Number(entry.rank) || 0,
+                userId: entry.userId,
+                name: entry.name || '',
+                className: entry.className || '',
+                avatar: entry.avatar || '',
+                level: Number(entry.level) || 1,
+                totalXp: Number(entry.totalXp) || 0,
+                totalRecords: Number(entry.totalRecords) || 0,
+                cups: Number(entry.totalRecords) || 0,          // 兼容旧字段
+                continuousDays: Number(entry.continuousDays) || 0,
+                totalBountiesCompleted: Number(entry.totalBountiesCompleted) || 0,
+                isCurrentUser: !!entry.isCurrentUser,
+                isMe: !!entry.isCurrentUser,                     // 兼容旧字段
+                createdAt: entry.createdAt || '',
+            }));
+
+            let currentUser = null;
+            if (res.data.currentUser) {
+                const cu = res.data.currentUser;
+                currentUser = {
+                    rank: Number(cu.rank) || 0,
+                    userId: cu.userId,
+                    name: cu.name || '',
+                    className: cu.className || '',
+                    avatar: cu.avatar || '',
+                    level: Number(cu.level) || 1,
+                    totalXp: Number(cu.totalXp) || 0,
+                    totalRecords: Number(cu.totalRecords) || 0,
+                    cups: Number(cu.totalRecords) || 0,
+                    continuousDays: Number(cu.continuousDays) || 0,
+                    totalBountiesCompleted: Number(cu.totalBountiesCompleted) || 0,
+                    isCurrentUser: true,
+                    isMe: true,
+                    createdAt: cu.createdAt || '',
+                };
+            }
+
+            this.leaderboardData = {
+                entries,
+                currentUser,
+                total: Number(res.data.total) || entries.length,
+                source: 'backend',
+            };
+
+            console.log(`[leaderboard] 从后端同步了 ${entries.length} 条排行数据`);
+
+            // 如果当前页面是排行榜，重新渲染
+            if (this.currentPage === 'leaderboard') {
+                const mainContent = document.getElementById('mainContent');
+                if (mainContent) {
+                    Leaderboard.render(mainContent);
+                }
+            }
+        } catch (err) {
+            this.leaderboardError = err.message;
+            console.warn('[leaderboard] 后端不可用，使用本地演示排行:', err.message);
+        } finally {
+            this.leaderboardLoading = false;
+        }
+    },
+
     getLeaderboard() {
+        // 后端数据可用时，返回真实排行（包括空数组场景）
+        if (this.leaderboardData && this.leaderboardData.entries) {
+            return this.leaderboardData.entries;
+        }
+
+        // 后端请求失败/尚未请求：使用本地演示 fallback
+        // leaderboardData 为 null 表示：
+        //   1. 请求失败（leaderboardError 有值）
+        //   2. 尚未请求过（leaderboardError 也为 null，首次加载页面时后端可能还没返回）
+        if (this.leaderboardError) {
+            console.log('[leaderboard] 后端不可用，使用本地演示排行');
+        }
         const stats = this.getStats();
         const allUsers = otherUsers.map(u => ({
             name: u.name,
@@ -1187,6 +1299,7 @@ const App = {
             cups: u.baseCups + Math.floor(Math.random() * 10),
             level: this._calcLevel(u.baseCups).level,
             isMe: false,
+            isCurrentUser: false,
         }));
 
         allUsers.push({
@@ -1195,6 +1308,7 @@ const App = {
             cups: stats.totalCups,
             level: stats.currentLevel,
             isMe: true,
+            isCurrentUser: true,
         });
 
         allUsers.sort((a, b) => b.cups - a.cups);
