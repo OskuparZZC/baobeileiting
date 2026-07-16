@@ -17,6 +17,12 @@ const App = {
     leaderboardData: null,
     leaderboardLoading: false,
     leaderboardError: null,
+    // 认证状态
+    authToken: null,
+    isAuthenticated: false,
+    authLoading: false,
+    authError: null,
+    _backendSyncDone: false,  // 防止重复调用 _initBackendSync()
 
     // 兼容旧代码：动态获取当前用户信息
     get userProfile() {
@@ -45,15 +51,24 @@ const App = {
         };
     },
 
-    init() {
+    async init() {
         // 1. 加载用户系统
         this.loadUsers();
-        // 2. 确定当前用户
-        this.resolveCurrentUser();
-        // 3. 加载当前用户数据
-        this.loadCurrentUserData();
-        // 3b. 确保后端用户绑定，然后同步统计、记录、图鉴（顺序执行，不阻塞 UI）
-        this._initBackendSync().catch(err => console.warn('[init] 后端同步异常:', err.message));
+        // 2. 读取 token 并尝试恢复认证会话
+        this.authToken = api.auth.getToken();
+        let authRestored = false;
+        if (this.authToken) {
+            authRestored = await this.restoreAuthSession();
+        }
+        // 3. 如果没有 token 或恢复失败，走旧本地用户流程
+        if (!authRestored) {
+            this.resolveCurrentUser();
+            this.loadCurrentUserData();
+            // 确保后端用户绑定，然后同步统计、记录、图鉴（顺序执行，不阻塞 UI）
+            if (!this._backendSyncDone) {
+                this._initBackendSync().catch(err => console.warn('[init] 后端同步异常:', err.message));
+            }
+        }
         // 4. 同步通知徽标（必须在 loadCurrentUserData 之后）
         this.updateNotificationBadge();
         // 5. 初始化每日任务系统（必须在 checkLoginStreak 之前，否则登录任务无法被标记）
@@ -635,12 +650,20 @@ const App = {
      *   不先用后端 0 覆盖本地 XP
      */
     async _initBackendSync() {
-        // 1. 确保后端用户绑定
-        try {
-            await this.ensureBackendUser();
-        } catch (err) {
-            console.warn('[init] 后端用户绑定失败，跳过所有后端同步:', err.message);
+        if (this._backendSyncDone) {
+            console.log('[init] 后端同步已执行，跳过重复调用');
             return;
+        }
+        this._backendSyncDone = true;
+
+        // 1. 确保后端用户绑定（仅非认证用户需要）
+        if (!this.isAuthenticated) {
+            try {
+                await this.ensureBackendUser();
+            } catch (err) {
+                console.warn('[init] 后端用户绑定失败，跳过所有后端同步:', err.message);
+                return;
+            }
         }
 
         // 2. 先同步记录（为迁移提供 totalRecords 数据）
@@ -669,6 +692,250 @@ const App = {
         } catch (err) {
             console.warn('[init] 排行榜同步失败（不影响其他功能）:', err.message);
         }
+    },
+
+    // ===== 认证会话管理 =====
+
+    /**
+     * 设置认证会话
+     * @param {string} token - JWT token
+     * @param {Object} backendUser - 后端返回的 user 对象 { id, name, className, studentId, avatar, levelInfo, stats }
+     */
+    setAuthSession(token, backendUser) {
+        // 1. 保存 token
+        api.auth.setToken(token);
+        this.authToken = token;
+        this.isAuthenticated = true;
+        this.authError = null;
+
+        // 2. 将后端 user 转换为前端兼容用户结构
+        const localId = 'auth_' + backendUser.id;
+        const levelInfo = backendUser.levelInfo || {};
+        const stats = backendUser.stats || {};
+
+        // 检查是否已有该认证用户对应的本地用户记录
+        let existingLocalId = null;
+        for (const [uid, u] of Object.entries(this.users)) {
+            if (u._backendId === backendUser.id) {
+                existingLocalId = uid;
+                break;
+            }
+        }
+
+        const targetId = existingLocalId || localId;
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+
+        if (existingLocalId) {
+            // 更新已有用户记录
+            const u = this.users[existingLocalId];
+            u.name = backendUser.name || u.name;
+            u.className = backendUser.className || u.className;
+            u.studentId = backendUser.studentId || u.studentId;
+            u.avatar = backendUser.avatar || u.avatar || '';
+            u._backendId = backendUser.id;
+            u.lastLoginDate = todayStr;
+        } else {
+            // 创建新的本地用户记录
+            this.users[targetId] = {
+                id: targetId,
+                name: backendUser.name || '',
+                className: backendUser.className || '',
+                studentId: backendUser.studentId || '',
+                avatar: backendUser.avatar || '',
+                joinDate: todayStr,
+                records: [],
+                nextRecordId: 1,
+                notificationCount: 0,
+                createdAt: now.toISOString(),
+                registerDate: todayStr,
+                lastLoginDate: todayStr,
+                continuousDays: stats.continuousDays || 1,
+                level: levelInfo.level || 1,
+                xp: levelInfo.xp || 0,
+                totalXp: levelInfo.totalXp || 0,
+                collection: {},
+                dailyTasks: null,
+                _backendId: backendUser.id,
+            };
+        }
+
+        // 3. 切换到该用户
+        if (this.currentUserId && this.currentUserId !== targetId) {
+            this.saveCurrentUserData();
+        }
+        this.currentUserId = targetId;
+        localStorage.setItem('baobei_lastUser', targetId);
+
+        // 4. 持久化
+        this.saveUsers();
+
+        // 5. 加载当前用户数据
+        this.loadCurrentUserData();
+
+        console.log(`[auth] 认证会话已设置: ${backendUser.name} (${backendUser.id}) → ${targetId}`);
+    },
+
+    /**
+     * 清除认证会话
+     */
+    clearAuthSession() {
+        api.auth.clearToken();
+        this.authToken = null;
+        this.isAuthenticated = false;
+        this.authError = null;
+
+        // 清空当前会话缓存
+        this.records = [];
+        this.leaderboardData = null;
+
+        // 清空当前用户的 backendStats
+        const user = this.getCurrentUser();
+        if (user) {
+            user.backendStats = null;
+            this.saveUsers();
+        }
+
+        // 切换到旧本地用户流程
+        const ids = Object.keys(this.users);
+        if (ids.length > 0) {
+            this.currentUserId = ids[0];
+            localStorage.setItem('baobei_lastUser', ids[0]);
+            this.loadCurrentUserData();
+        } else {
+            this.currentUserId = null;
+            localStorage.removeItem('baobei_lastUser');
+        }
+
+        console.log('[auth] 认证会话已清除');
+    },
+
+    /**
+     * 恢复认证会话
+     * @returns {Promise<boolean>} 是否成功恢复
+     */
+    async restoreAuthSession() {
+        const token = api.auth.getToken();
+        if (!token) return false;
+
+        this.authLoading = true;
+        try {
+            const res = await api.users.me();
+            if (res.data && res.data.user) {
+                this.setAuthSession(token, res.data.user);
+                this.authLoading = false;
+                // 执行后端同步
+                try {
+                    await this._initBackendSync();
+                } catch (err) {
+                    console.warn('[auth] 恢复后同步异常:', err.message);
+                }
+                console.log('[auth] 认证会话已恢复');
+                return true;
+            }
+            // 响应异常，清除 token
+            console.warn('[auth] /me 返回数据异常，清除 token');
+            this.clearAuthSession();
+            this.authLoading = false;
+            return false;
+        } catch (err) {
+            this.authLoading = false;
+            if (err.code === 401 || err.status === 401) {
+                // 401：token 无效，清除
+                console.warn('[auth] token 已失效，清除认证会话');
+                this.clearAuthSession();
+                return false;
+            }
+            // 网络错误：保留 token，保留本地缓存
+            console.warn('[auth] 恢复认证会话网络错误，保留 token:', err.message);
+            return false;
+        }
+    },
+
+    /**
+     * 使用密码登录
+     * @param {string} studentId - 学号
+     * @param {string} password - 密码
+     * @returns {Promise<Object>} { success, user }
+     */
+    async loginWithPassword(studentId, password) {
+        const trimmedId = (studentId || '').trim();
+        if (!trimmedId) {
+            const err = new Error('请输入学号');
+            err.code = 400;
+            this.authError = err.message;
+            throw err;
+        }
+        if (!password) {
+            const err = new Error('请输入密码');
+            err.code = 400;
+            this.authError = err.message;
+            throw err;
+        }
+
+        try {
+            const res = await api.users.login({ studentId: trimmedId, password });
+            if (!res.data || !res.data.token || !res.data.user) {
+                const err = new Error('登录响应异常');
+                err.code = 500;
+                this.authError = err.message;
+                throw err;
+            }
+            this.setAuthSession(res.data.token, res.data.user);
+            // 执行后端同步
+            try {
+                await this._initBackendSync();
+            } catch (syncErr) {
+                console.warn('[auth] 登录后同步异常:', syncErr.message);
+            }
+            return { success: true, user: res.data.user };
+        } catch (err) {
+            this.authError = err.message;
+            throw err;
+        }
+    },
+
+    /**
+     * 注册新账号
+     * @param {Object} payload - { name, className, studentId, password }
+     * @returns {Promise<Object>} { success, user }
+     */
+    async registerAccount(payload) {
+        try {
+            const res = await api.users.register(payload);
+            if (!res.data || !res.data.token || !res.data.user) {
+                const err = new Error('注册响应异常');
+                err.code = 500;
+                this.authError = err.message;
+                throw err;
+            }
+            this.setAuthSession(res.data.token, res.data.user);
+            // 执行后端同步
+            try {
+                await this._initBackendSync();
+            } catch (syncErr) {
+                console.warn('[auth] 注册后同步异常:', syncErr.message);
+            }
+            return { success: true, user: res.data.user };
+        } catch (err) {
+            this.authError = err.message;
+            throw err;
+        }
+    },
+
+    /**
+     * 退出登录
+     */
+    logout() {
+        // 先保存当前用户数据
+        this.saveCurrentUserData();
+        // 清除认证会话
+        this.clearAuthSession();
+        // 刷新页面显示
+        this.updateHeaderAvatar();
+        this.updateNotificationBadge();
+        this.navigateTo('dashboard');
+        console.log('[auth] 已退出登录');
     },
 
     /**

@@ -17,9 +17,59 @@ const API_BASE = (() => {
 
 const api = {
 
+  // ==================== Token 管理 ====================
+
+  auth: {
+    token: null,
+    _storageKey: 'baobei_auth_token',
+
+    /**
+     * 设置 token
+     * @param {string|null} token - JWT token，传 null 或空字符串时清除
+     */
+    setToken(token) {
+      if (token) {
+        this.token = token;
+        try {
+          localStorage.setItem(this._storageKey, token);
+        } catch (e) {
+          console.warn('[auth] 保存 token 失败:', e.message);
+        }
+      } else {
+        this.clearToken();
+      }
+    },
+
+    /**
+     * 获取 token
+     * @returns {string|null}
+     */
+    getToken() {
+      if (this.token) return this.token;
+      try {
+        this.token = localStorage.getItem(this._storageKey);
+      } catch (e) {
+        console.warn('[auth] 读取 token 失败:', e.message);
+      }
+      return this.token || null;
+    },
+
+    /**
+     * 清除 token
+     */
+    clearToken() {
+      this.token = null;
+      try {
+        localStorage.removeItem(this._storageKey);
+      } catch (e) {
+        console.warn('[auth] 清除 token 失败:', e.message);
+      }
+    },
+  },
+
   /**
    * 通用请求
-   * @param {string} method  - GET | POST | DELETE
+   * @param {string} method  - GET | POST | DELETE | PUT
    * @param {string} path    - /drinks 等（不含 /api 前缀）
    * @param {Object} options - { body?, xUserId? }
    * @returns {Object} { code, message, data }
@@ -27,17 +77,52 @@ const api = {
   async request(method, path, options = {}) {
     const { body, xUserId } = options;
     const headers = { 'Content-Type': 'application/json' };
-    if (xUserId) headers['x-user-id'] = String(xUserId);
+
+    // Token 优先于 x-user-id，不同时发送
+    const token = this.auth.getToken();
+    if (token) {
+      headers['Authorization'] = 'Bearer ' + token;
+    } else if (xUserId) {
+      headers['x-user-id'] = String(xUserId);
+    }
 
     const fetchOptions = { method, headers };
     if (body) fetchOptions.body = JSON.stringify(body);
 
-    const res = await fetch(`${API_BASE}${path}`, fetchOptions);
-    const json = await res.json();
+    let res;
+    try {
+      res = await fetch(`${API_BASE}${path}`, fetchOptions);
+    } catch (networkErr) {
+      const err = new Error(networkErr.message || '网络请求失败');
+      err.code = 0;
+      err.isNetworkError = true;
+      throw err;
+    }
+
+    let json;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      const err = new Error('响应解析失败');
+      err.code = res.status;
+      err.status = res.status;
+      throw err;
+    }
+
+    // 401 统一处理：清除 token
+    if (res.status === 401) {
+      this.auth.clearToken();
+      const err = new Error(json.message || '认证已失效，请重新登录');
+      err.code = 401;
+      err.status = 401;
+      err.data = json.data;
+      throw err;
+    }
 
     if (!res.ok || (json.code && json.code >= 400)) {
       const err = new Error(json.message || '请求失败');
       err.code = json.code || res.status;
+      err.status = res.status;
       err.data = json.data;
       throw err;
     }
@@ -46,6 +131,7 @@ const api = {
 
   get(path, opts)    { return this.request('GET', path, opts); },
   post(path, body, opts) { return this.request('POST', path, { body, ...opts }); },
+  put(path, body, opts) { return this.request('PUT', path, { body, ...opts }); },
   delete(path, opts) { return this.request('DELETE', path, opts); },
 
   // ==================== 饮品 ====================
@@ -72,9 +158,36 @@ const api = {
      * 注册新用户（自动绑定后端）
      * @param {Object} data - { name, className, studentId, password }
      * @returns {Object} { code, message, data: { user, token } }
+     * 注意：token 由 App 层处理，api 层不自动保存 token
      */
     register(data) {
       return api.post('/users/register', data);
+    },
+
+    /**
+     * 用户登录
+     * @param {Object} data - { studentId, password }
+     * @returns {Object} { code, message, data: { user, token } }
+     */
+    login(data) {
+      return api.post('/users/login', data);
+    },
+
+    /**
+     * 获取当前用户信息（使用 Bearer Token）
+     * @returns {Object} { code, message, data: { user } }
+     */
+    me() {
+      return api.get('/users/me');
+    },
+
+    /**
+     * 修改密码
+     * @param {Object} data - { currentPassword, newPassword, confirmPassword }
+     * @returns {Object} { code, message, data }
+     */
+    changePassword(data) {
+      return api.put('/users/me/password', data);
     },
 
     /**
