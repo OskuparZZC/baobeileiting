@@ -20,9 +20,10 @@ function serializeUser(user, stats = null) {
 
   // XP 优先从 stats 读取（user_stats 表是 XP 的单一真实来源）
   // 如果 stats 不可用，回退到 user 对象上的字段（兼容旧代码）
-  const totalXp = stats ? (stats.totalXp || 0) : (user.totalXp || user.xp || 0);
-  const currentXp = stats ? (stats.xp || 0) : (user.xp || 0);
-  const level = stats ? (stats.level || 1) : (user.level || 1);
+  // 使用 ?? 而非 ||：避免 totalXp=0 时错误地回退到 user.xp
+  const totalXp = stats ? (stats.totalXp ?? 0) : (user.totalXp ?? user.xp ?? 0);
+  const currentXp = stats ? (stats.xp ?? 0) : (user.xp ?? 0);
+  const level = stats ? (stats.level ?? 1) : (user.level ?? 1);
 
   const levelInfo = getXPLevelInfo(totalXp);
 
@@ -55,13 +56,14 @@ function serializeUser(user, stats = null) {
     // 时间相关
     joinDate: user.joinDate || toDateStr(user.createdAt),
     registerDate: user.registerDate || toDateStr(user.createdAt),
-    lastLoginDate: stats ? (stats.lastRecordDate || '') : (user.lastLoginDate || ''),
+    // lastLoginDate 只能来自 user.lastLoginDate，不能使用 stats.lastRecordDate
+    lastLoginDate: user.lastLoginDate || '',
 
     // XP / 等级相关（优先从 stats 读取）
     level: level,
     xp: currentXp,
     totalXp: totalXp,
-    continuousDays: stats ? (stats.continuousDays || 0) : (user.streak || 0),
+    continuousDays: stats ? (stats.continuousDays ?? 0) : (user.streak ?? 0),
 
     // 等级信息（动态计算）
     levelInfo: {
@@ -77,14 +79,14 @@ function serializeUser(user, stats = null) {
 
     // 统计（新的 camelCase 格式）
     stats: stats ? {
-      level: stats.level || 1,
-      xp: stats.xp || 0,
-      totalXp: stats.totalXp || 0,
-      continuousDays: stats.continuousDays || 0,
-      lastRecordDate: stats.lastRecordDate || null,
-      totalRecords: stats.totalRecords || 0,
-      totalBountiesPublished: stats.totalBountiesPublished || 0,
-      totalBountiesCompleted: stats.totalBountiesCompleted || 0,
+      level: stats.level ?? 1,
+      xp: stats.xp ?? 0,
+      totalXp: stats.totalXp ?? 0,
+      continuousDays: stats.continuousDays ?? 0,
+      lastRecordDate: stats.lastRecordDate ?? null,
+      totalRecords: stats.totalRecords ?? 0,
+      totalBountiesPublished: stats.totalBountiesPublished ?? 0,
+      totalBountiesCompleted: stats.totalBountiesCompleted ?? 0,
     } : null,
 
     // 元数据

@@ -47,10 +47,8 @@ const App = {
         this.resolveCurrentUser();
         // 3. 加载当前用户数据
         this.loadCurrentUserData();
-        // 3b. 从后端同步记录（异步，不阻塞 UI）
-        this.syncRecordsFromBackend().catch(err => console.warn('[init] 记录同步异常:', err.message));
-        // 3c. 从后端同步图鉴（异步，不阻塞 UI）
-        this.syncCollectionFromBackend().catch(err => console.warn('[init] 图鉴同步异常:', err.message));
+        // 3b. 确保后端用户绑定，然后同步统计、记录、图鉴（顺序执行，不阻塞 UI）
+        this._initBackendSync().catch(err => console.warn('[init] 后端同步异常:', err.message));
         // 4. 同步通知徽标（必须在 loadCurrentUserData 之后）
         this.updateNotificationBadge();
         // 5. 初始化每日任务系统（必须在 checkLoginStreak 之前，否则登录任务无法被标记）
@@ -433,6 +431,11 @@ const App = {
             const res = await api.records.me(user._backendId);
             if (res.data && Array.isArray(res.data.records)) {
                 const backendRecords = res.data.records.map(r => this._normalizeBackendRecord(r));
+                // 后端无记录时保留本地数据（防止迁移阶段丢失历史记录）
+                if (backendRecords.length === 0 && this.records.length > 0) {
+                    console.log('[records] 后端无记录，保留本地数据');
+                    return;
+                }
                 this.records = backendRecords;
                 this.nextRecordId = backendRecords.length > 0
                     ? Math.max(...backendRecords.map(r => r.id)) + 1
@@ -513,6 +516,258 @@ const App = {
             }
         } catch (err) {
             console.warn('[collection] 后端同步失败，保留本地数据:', err.message);
+        }
+    },
+
+    /**
+     * 从后端同步用户统计（XP、等级、连续天数等）到前端
+     * - 异步执行，不阻塞页面初始化
+     * - 成功则覆盖 currentUser 的 XP/等级/连续天数字段
+     * - 失败则保留 localStorage 现有数据
+     * - 注意：后端 totalXp=0 时正确写入 0，不使用 || 导致被旧值覆盖
+     * - 如果后端为空白统计而本地有历史数据，暂不覆盖，标记 needsMigration
+     */
+    async syncUserStatsFromBackend() {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) {
+            console.log('[stats] 未绑定后端用户，跳过统计同步');
+            return;
+        }
+
+        try {
+            const res = await api.users.getStats(user._backendId);
+            if (!res.data || !res.data.stats) {
+                console.warn('[stats] 后端返回数据格式异常，保留本地数据');
+                return;
+            }
+
+            const stats = res.data.stats;
+
+            // 安全 normalize：使用显式 Number 转换，0 不会被 || 忽略
+            const backendLevel = Number(stats.level ?? 1);
+            const backendXp = Number(stats.xp ?? 0);
+            const backendTotalXp = Number(stats.totalXp ?? 0);
+            const backendContinuousDays = Number(stats.continuousDays ?? 0);
+            const backendTotalRecords = Number(stats.totalRecords ?? 0);
+            const backendBountiesPublished = Number(stats.totalBountiesPublished ?? 0);
+            const backendBountiesCompleted = Number(stats.totalBountiesCompleted ?? 0);
+
+            // 判断后端是否为空白统计（新建用户默认值）
+            // 注意：lastRecordDate 在实际 MySQL user_stats 表中没有对应列，
+            // normalizeStatsRow 始终返回 null，不纳入空白判断
+            const backendIsBlank =
+                backendTotalXp === 0 &&
+                backendXp === 0 &&
+                backendLevel <= 1 &&
+                backendContinuousDays === 0 &&
+                backendTotalRecords === 0 &&
+                backendBountiesPublished === 0 &&
+                backendBountiesCompleted === 0;
+
+            // 判断本地是否有历史数据
+            const localHasHistory =
+                (user.totalXp > 0) ||
+                (user.xp > 0) ||
+                (user.level > 1) ||
+                (user.continuousDays > 0) ||
+                (this.records && this.records.length > 0);
+
+            // 保存后端统计数据到 user.backendStats（始终保存）
+            const backendStatsData = {
+                totalRecords: isNaN(backendTotalRecords) ? 0 : backendTotalRecords,
+                totalBountiesPublished: isNaN(backendBountiesPublished) ? 0 : backendBountiesPublished,
+                totalBountiesCompleted: isNaN(backendBountiesCompleted) ? 0 : backendBountiesCompleted,
+                lastRecordDate: stats.lastRecordDate || '',
+                needsMigration: false,
+            };
+
+            if (backendIsBlank && localHasHistory) {
+                // 后端是空白统计，本地有历史数据 → 不覆盖，标记需要迁移
+                console.warn('[stats] 检测到本地历史统计，等待迁移，暂不使用后端空白数据覆盖');
+                backendStatsData.needsMigration = true;
+                user.backendStats = backendStatsData;
+                this.saveUsers();
+                return;
+            }
+
+            // 后端不是空白，或本地也没有历史数据 → 正常写入
+            user.level = isNaN(backendLevel) ? (user.level ?? 1) : backendLevel;
+            user.xp = isNaN(backendXp) ? (user.xp ?? 0) : backendXp;
+            user.totalXp = isNaN(backendTotalXp) ? (user.totalXp ?? 0) : backendTotalXp;
+            user.continuousDays = isNaN(backendContinuousDays) ? (user.continuousDays ?? 1) : backendContinuousDays;
+
+            // 注意：lastRecordDate（最后记录日期）≠ lastLoginDate（最后登录日期）
+            // lastRecordDate 只保存到 backendStats，不覆盖 lastLoginDate
+
+            user.backendStats = backendStatsData;
+
+            // 持久化到 localStorage
+            this.saveUsers();
+
+            // 刷新当前页面显示（如有 XP 卡片则更新）
+            if (this.currentPage === 'dashboard' || this.currentPage === 'profile') {
+                const mainContent = document.getElementById('mainContent');
+                if (mainContent) {
+                    if (this.currentPage === 'dashboard') {
+                        Dashboard.render(mainContent);
+                    } else if (this.currentPage === 'profile') {
+                        Profile.render(mainContent);
+                    }
+                }
+            }
+
+            console.log(`[stats] 从后端同步统计成功: Lv.${user.level}, XP=${user.xp}, totalXp=${user.totalXp}, 连续${user.continuousDays}天`);
+        } catch (err) {
+            console.warn('[stats] 后端统计同步失败，保留本地数据:', err.message);
+        }
+    },
+
+    /**
+     * 初始化后端同步（确保绑定后按顺序同步记录、图鉴、统计、迁移）
+     * - 不阻塞 UI，所有失败静默处理
+     * - 顺序：记录 → 图鉴 → 统计 → 迁移 → 重新拉取统计
+     *   确保 totalRecords 来自后端同步后的记录数组
+     *   不先用后端 0 覆盖本地 XP
+     */
+    async _initBackendSync() {
+        // 1. 确保后端用户绑定
+        try {
+            await this.ensureBackendUser();
+        } catch (err) {
+            console.warn('[init] 后端用户绑定失败，跳过所有后端同步:', err.message);
+            return;
+        }
+
+        // 2. 先同步记录（为迁移提供 totalRecords 数据）
+        await this.syncRecordsFromBackend();
+
+        // 3. 同步图鉴
+        await this.syncCollectionFromBackend();
+
+        // 4. 同步用户统计（检测 needsMigration）
+        await this.syncUserStatsFromBackend();
+
+        // 5. 如果检测到需要迁移，执行迁移
+        const user = this.getCurrentUser();
+        if (user && user.backendStats && user.backendStats.needsMigration) {
+            await this.migrateLocalStatsToBackend();
+
+            // 6. 迁移成功后重新拉取后端统计
+            if (user.backendStats && !user.backendStats.needsMigration) {
+                await this.syncUserStatsFromBackend();
+            }
+        }
+    },
+
+    /**
+     * 将本地历史统计迁移到后端
+     * - 仅在 user.backendStats.needsMigration === true 时运行
+     * - 迁移成功后用后端数据覆盖本地，并清除 needsMigration 标记
+     * - 迁移失败或后端已有统计时保留本地数据
+     */
+    async migrateLocalStatsToBackend() {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) {
+            console.log('[stats] 未绑定后端用户，跳过迁移');
+            return;
+        }
+
+        if (!user.backendStats || !user.backendStats.needsMigration) {
+            console.log('[stats] 无需迁移（needsMigration=false）');
+            return;
+        }
+
+        // 从 records 中取最大 date 作为 lastRecordDate
+        let lastRecordDate = null;
+        if (this.records && this.records.length > 0) {
+            const validDates = this.records
+                .map(r => this._normalizeDateField(r.date))
+                .filter(d => d && d.length === 10);
+            if (validDates.length > 0) {
+                validDates.sort(); // YYYY-MM-DD 字符串排序
+                lastRecordDate = validDates[validDates.length - 1];
+            }
+        }
+
+        const payload = {
+            level: Number(user.level || 1),
+            xp: Number(user.xp || 0),
+            totalXp: Number(user.totalXp || 0),
+            continuousDays: Number(user.continuousDays || 0),
+            totalRecords: this.records ? this.records.length : 0,
+            lastRecordDate: lastRecordDate, // YYYY-MM-DD 或 null
+        };
+
+        try {
+            const res = await api.users.migrateStats(payload, user._backendId);
+
+            if (!res.data) {
+                console.warn('[stats] 迁移返回数据异常，保留本地数据');
+                return;
+            }
+
+            const { stats, migrated, reason } = res.data;
+
+            if (migrated === true) {
+                // 迁移成功，用后端 stats 覆盖本地
+                user.level = Number(stats.level ?? payload.level);
+                user.xp = Number(stats.xp ?? payload.xp);
+                user.totalXp = Number(stats.totalXp ?? payload.totalXp);
+                user.continuousDays = Number(stats.continuousDays ?? payload.continuousDays);
+
+                // 更新 backendStats
+                user.backendStats = {
+                    totalRecords: Number(stats.totalRecords ?? 0),
+                    totalBountiesPublished: Number(stats.totalBountiesPublished ?? 0),
+                    totalBountiesCompleted: Number(stats.totalBountiesCompleted ?? 0),
+                    lastRecordDate: stats.lastRecordDate || '',
+                    needsMigration: false,
+                };
+
+                this.saveUsers();
+                console.log('[stats] 本地历史统计迁移成功');
+
+                // 刷新页面显示
+                if (this.currentPage === 'dashboard' || this.currentPage === 'profile') {
+                    const mainContent = document.getElementById('mainContent');
+                    if (mainContent) {
+                        if (this.currentPage === 'dashboard') {
+                            Dashboard.render(mainContent);
+                        } else if (this.currentPage === 'profile') {
+                            Profile.render(mainContent);
+                        }
+                    }
+                }
+            } else if (migrated === false && reason === 'backend_not_blank') {
+                // 后端已有统计，使用后端数据
+                user.level = Number(stats.level ?? user.level);
+                user.xp = Number(stats.xp ?? user.xp);
+                user.totalXp = Number(stats.totalXp ?? user.totalXp);
+                user.continuousDays = Number(stats.continuousDays ?? user.continuousDays);
+
+                user.backendStats = {
+                    totalRecords: Number(stats.totalRecords ?? 0),
+                    totalBountiesPublished: Number(stats.totalBountiesPublished ?? 0),
+                    totalBountiesCompleted: Number(stats.totalBountiesCompleted ?? 0),
+                    lastRecordDate: stats.lastRecordDate || '',
+                    needsMigration: false,
+                };
+
+                this.saveUsers();
+                console.warn('[stats] 后端已有统计，跳过本地迁移');
+            } else {
+                // 未知状态，保留本地数据
+                user.backendStats = user.backendStats || {};
+                user.backendStats.needsMigration = true;
+                this.saveUsers();
+                console.warn('[stats] 迁移返回未知状态:', { migrated, reason });
+            }
+        } catch (err) {
+            // 请求失败，保留 needsMigration，页面继续正常使用
+            console.warn('[stats] 迁移请求失败，保留本地数据:', err.message);
+            user.backendStats = user.backendStats || {};
+            user.backendStats.needsMigration = true;
+            this.saveUsers();
         }
     },
 

@@ -76,6 +76,25 @@ const api = {
     register(data) {
       return api.post('/users/register', data);
     },
+
+    /**
+     * 获取当前用户统计信息
+     * @param {string} xUserId - 后端用户 ID（UUID）
+     * @returns {Object} { code, message, data: { stats } }
+     */
+    getStats(xUserId) {
+      return api.get('/users/me/stats', { xUserId });
+    },
+
+    /**
+     * 迁移本地历史统计到后端
+     * @param {Object} payload - { level, xp, totalXp, continuousDays, totalRecords, lastRecordDate }
+     * @param {string} xUserId
+     * @returns {Object} { code, message, data: { stats, migrated, reason } }
+     */
+    migrateStats(payload, xUserId) {
+      return api.post('/users/me/stats/migrate', payload, { xUserId });
+    },
   },
 
   // ==================== 记录 ====================

@@ -408,6 +408,146 @@ class UserStatsModel extends BaseModel {
   }
 
   /**
+   * 判断后端统计是否为空白（新建用户默认值）
+   * 空白条件：所有统计字段均为默认值
+   *
+   * 注意：实际 MySQL user_stats 表没有 last_record_date 列，
+   * lastRecordDate 始终为 null（由 normalizeStatsRow 返回），
+   * 因此空白判断不依赖 lastRecordDate。
+   *
+   * @param {Object} stats - normalizeStatsRow 输出的统计对象
+   * @returns {boolean}
+   */
+  _isStatsBlank(stats) {
+    if (!stats) return true;
+    return (
+      stats.totalXp === 0 &&
+      stats.xp === 0 &&
+      stats.level <= 1 &&
+      stats.continuousDays === 0 &&
+      stats.totalRecords === 0 &&
+      stats.totalBountiesPublished === 0 &&
+      stats.totalBountiesCompleted === 0
+    );
+  }
+
+  /**
+   * 原子条件迁移：只在后端统计为空白时才写入
+   *
+   * 使用 WHERE 条件确保原子性，防止并发重复迁移：
+   *   UPDATE user_stats SET ...
+   *   WHERE user_id = ?
+   *     AND total_xp = 0 AND xp = 0 AND level <= 1
+   *     AND continuous_days = 0 AND total_drinks = 0
+   *     AND total_bounties = 0 AND total_help_completed = 0
+   *
+   * 注意：实际 MySQL user_stats 表没有 last_record_date 列，
+   * lastRecordDate 仅在 API 响应中返回（始终为 null），
+   * 原子 UPDATE 不依赖该列。
+   *
+   * @param {string|number} userId
+   * @param {Object} data - { level, xp, totalXp, continuousDays, totalRecords, lastRecordDate }
+   * @returns {Promise<{ migrated: boolean, reason?: string }>}
+   */
+  async migrateIfBlank(userId, data) {
+    console.log('[migrate] 收到迁移请求, userId=', userId, 'data=', JSON.stringify(data));
+
+    // 先查询当前状态
+    const currentStats = await this.findByUserId(userId);
+    console.log('[migrate] 当前后端统计:', JSON.stringify(currentStats));
+    console.log('[migrate] _isStatsBlank 结果:', this._isStatsBlank(currentStats));
+
+    if (!this._isStatsBlank(currentStats)) {
+      console.log('[migrate] 后端非空白，拒绝迁移');
+      return { migrated: false, reason: 'backend_not_blank' };
+    }
+
+    // 构建 SET 子句（使用白名单映射）
+    const setClauses = [];
+    const values = [];
+    const fieldMappings = {
+      level:           { col: 'level',           value: data.level },
+      xp:              { col: 'xp',              value: data.xp },
+      totalXp:         { col: 'total_xp',        value: data.totalXp },
+      continuousDays:  { col: 'continuous_days', value: data.continuousDays },
+      totalRecords:    { col: 'total_drinks',    value: data.totalRecords },
+    };
+
+    for (const [apiKey, { col, value }] of Object.entries(fieldMappings)) {
+      if (value !== undefined) {
+        setClauses.push(`${col} = ?`);
+        values.push(value);
+      }
+    }
+
+    // lastRecordDate: 写入 last_record_date 列（schema.sql 定义了该列）
+    if (data.lastRecordDate !== undefined && data.lastRecordDate !== null) {
+      setClauses.push('last_record_date = ?');
+      values.push(data.lastRecordDate);
+    }
+
+    setClauses.push('updated_at = ?');
+    values.push(getMysqlDateTime());
+
+    // WHERE 条件值（仅 user_id 使用占位符，其余为字面量）
+    values.push(userId);
+
+    const sql = `UPDATE user_stats
+           SET ${setClauses.join(', ')}
+           WHERE user_id = ?
+             AND total_xp = 0
+             AND xp = 0
+             AND level <= 1
+             AND continuous_days = 0
+             AND total_drinks = 0
+             AND total_bounties = 0
+             AND total_help_completed = 0`;
+
+    console.log('[migrate] 执行 SQL:', sql);
+    console.log('[migrate] SQL 参数:', JSON.stringify(values));
+
+    if (this.pool) {
+      try {
+        const [result] = await this.pool.execute(sql, values);
+
+        console.log('[migrate] affectedRows:', result.affectedRows);
+
+        if (result.affectedRows === 0) {
+          // WHERE 条件不满足（被并发写入或已迁移）
+          console.log(`[migrate] 用户 ${userId} 迁移条件不满足，可能已被并发写入`);
+          return { migrated: false, reason: 'backend_not_blank' };
+        }
+
+        console.log(`[migrate] 用户 ${userId} 迁移成功`);
+        return { migrated: true };
+      } catch (err) {
+        console.error('[migrate] MySQL migrateIfBlank 失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback（非原子，但开发环境可接受）
+    console.log('[migrate] 进入内存 fallback 路径');
+    const stats = await this.findByUserId(userId);
+    console.log('[migrate] 内存 fallback 查询结果:', JSON.stringify(stats));
+    if (!this._isStatsBlank(stats)) {
+      console.log('[migrate] 内存 fallback: 后端非空白');
+      return { migrated: false, reason: 'backend_not_blank' };
+    }
+    for (const [apiKey, { value }] of Object.entries(fieldMappings)) {
+      if (value !== undefined) {
+        stats[apiKey] = value;
+      }
+    }
+    if (data.lastRecordDate !== undefined) {
+      stats.lastRecordDate = data.lastRecordDate;
+    }
+    stats.updatedAt = new Date().toISOString();
+    this.update(stats.id, stats);
+    console.log('[migrate] 内存 fallback 迁移成功');
+    return { migrated: true };
+  }
+
+  /**
    * 原子自增统计字段（白名单校验）
    * - 使用 SQL 原子自增，避免并发覆盖
    * - 更新后返回最新统计

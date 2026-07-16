@@ -188,6 +188,97 @@ router.get('/me/stats', authMiddleware, async (req, res) => {
   }
 });
 
+// ==================== 迁移本地统计到后端 ====================
+
+/**
+ * POST /api/users/me/stats/migrate
+ *
+ * 将本地历史统计一次性迁移到 MySQL。
+ * 只在后端统计仍为空白时执行迁移，防止覆盖已有数据。
+ *
+ * 请求体：
+ *   level, xp, totalXp, continuousDays, totalRecords, lastRecordDate
+ *
+ * 不迁移 totalBountiesPublished / totalBountiesCompleted
+ */
+router.post('/me/stats/migrate', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 检查用户是否存在
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return error(res, 404, '用户不存在');
+    }
+
+    // 1. 输入校验
+    const { level, xp, totalXp, continuousDays, totalRecords, lastRecordDate } = req.body;
+
+    // 字段存在性检查
+    if (level === undefined || xp === undefined || totalXp === undefined ||
+        continuousDays === undefined || totalRecords === undefined) {
+      return error(res, 400, '缺少必填字段: level, xp, totalXp, continuousDays, totalRecords');
+    }
+
+    // 类型和范围校验
+    const parsedLevel = parseInt(level, 10);
+    const parsedXp = parseInt(xp, 10);
+    const parsedTotalXp = parseInt(totalXp, 10);
+    const parsedContinuousDays = parseInt(continuousDays, 10);
+    const parsedTotalRecords = parseInt(totalRecords, 10);
+
+    if (isNaN(parsedLevel) || parsedLevel < 1 || parsedLevel > 100) {
+      return error(res, 400, 'level 必须是 1~100 的整数');
+    }
+    if (isNaN(parsedXp) || parsedXp < 0 || parsedXp > 1000000) {
+      return error(res, 400, 'xp 必须是 0~1000000 的非负整数');
+    }
+    if (isNaN(parsedTotalXp) || parsedTotalXp < 0 || parsedTotalXp > 1000000) {
+      return error(res, 400, 'totalXp 必须是 0~1000000 的非负整数');
+    }
+    if (isNaN(parsedContinuousDays) || parsedContinuousDays < 0 || parsedContinuousDays > 10000) {
+      return error(res, 400, 'continuousDays 必须是 0~10000 的非负整数');
+    }
+    if (isNaN(parsedTotalRecords) || parsedTotalRecords < 0 || parsedTotalRecords > 100000) {
+      return error(res, 400, 'totalRecords 必须是 0~100000 的非负整数');
+    }
+
+    // lastRecordDate 校验：YYYY-MM-DD 或 null
+    let parsedDate = null;
+    if (lastRecordDate !== null && lastRecordDate !== undefined && lastRecordDate !== '') {
+      if (typeof lastRecordDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(lastRecordDate)) {
+        return error(res, 400, 'lastRecordDate 必须是 YYYY-MM-DD 格式或 null');
+      }
+      parsedDate = lastRecordDate;
+    }
+
+    // 2. 确保统计行存在
+    await UserStatsModel.initForUser(userId);
+
+    // 3. 尝试原子条件迁移（只在后端为空白时写入）
+    const result = await UserStatsModel.migrateIfBlank(userId, {
+      level: parsedLevel,
+      xp: parsedXp,
+      totalXp: parsedTotalXp,
+      continuousDays: parsedContinuousDays,
+      totalRecords: parsedTotalRecords,
+      lastRecordDate: parsedDate,
+    });
+
+    // 4. 重新查询最新统计
+    const updatedStats = await UserStatsModel.findByUserId(userId);
+
+    return success(res, {
+      stats: updatedStats,
+      migrated: result.migrated,
+      reason: result.reason || null,
+    }, result.migrated ? '迁移成功' : '后端已有统计，跳过迁移');
+  } catch (err) {
+    console.error('迁移统计失败:', err);
+    return serverError(res, '迁移统计失败');
+  }
+});
+
 // ==================== 每日签到 ====================
 
 router.post('/me/checkin', authMiddleware, (req, res) => {
