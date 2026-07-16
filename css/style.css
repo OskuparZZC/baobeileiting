@@ -1191,3 +1191,121 @@ a {
         font-size: var(--font-size-md);
     }
 }
+
+/* ===== 账号与安全卡片 ===== */
+.account-security-card { }
+
+.security-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.security-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--spacing-md);
+    background: var(--color-cream);
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 48px;
+    text-align: left;
+}
+
+.security-action:active {
+    background: var(--color-accent-light);
+    transform: scale(0.98);
+}
+
+.security-action-content {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.security-action-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--color-accent-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.security-action-icon i {
+    font-size: var(--font-size-lg);
+    color: var(--color-primary);
+}
+
+.security-action-icon-danger {
+    background: #FDECEC;
+}
+
+.security-action-icon-danger i {
+    color: var(--color-danger);
+}
+
+.security-action-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.security-action-label {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.security-action-desc {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-light);
+}
+
+.security-action-danger {
+    border: 1px solid #FDECEC;
+}
+
+.security-action-danger .security-action-label {
+    color: var(--color-danger);
+}
+
+.security-action > .fa-chevron-right {
+    color: var(--color-text-light);
+    font-size: var(--font-size-sm);
+    flex-shrink: 0;
+}
+
+/* ===== 密码修改模态框 ===== */
+.password-modal { }
+
+.password-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.password-form .form-group {
+    margin-bottom: var(--spacing-lg);
+}
+
+.password-form .form-group:last-of-type {
+    margin-bottom: var(--spacing-xl);
+}
+
+.password-error {
+    background: #FDECEC;
+    color: var(--color-danger);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: 10px;
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-lg);
+    text-align: center;
+    font-weight: 500;
+}

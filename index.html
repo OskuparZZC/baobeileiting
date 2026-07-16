@@ -106,6 +106,39 @@
         </div>
     </div>
 
+    <!-- 修改密码弹窗 -->
+    <div class="modal-overlay" id="passwordModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-lock"></i> 修改密码</h3>
+                <button class="modal-close" id="closePasswordModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="passwordError" class="auth-error" style="display:none;"></div>
+                <form class="password-form" id="passwordForm" autocomplete="off">
+                    <div class="form-group">
+                        <label>当前密码</label>
+                        <input type="password" id="currentPassword" class="form-input" placeholder="输入当前密码" autocomplete="current-password">
+                    </div>
+                    <div class="form-group">
+                        <label>新密码</label>
+                        <input type="password" id="newPassword" class="form-input" placeholder="6~72位新密码" autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label>确认新密码</label>
+                        <input type="password" id="confirmPassword" class="form-input" placeholder="再次输入新密码" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block auth-submit" id="submitPasswordBtn">
+                        <span id="passwordBtnText">确认修改</span>
+                        <span class="auth-submit-spinner" id="passwordSpinner" style="display:none;"><i class="fas fa-spinner fa-pulse"></i></span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- 添加饮品弹窗 -->
     <div class="modal-overlay" id="addDrinkModal">
         <div class="modal-content">

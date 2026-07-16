@@ -1915,7 +1915,14 @@ const App = {
         switch (page) {
             case 'dashboard': Dashboard.render(mainContent); break;
             case 'records': Records.render(mainContent); break;
-            case 'profile': Profile.render(mainContent); break;
+            case 'profile':
+                try {
+                    Profile.render(mainContent);
+                } catch (error) {
+                    console.error('[Profile] 页面渲染失败:', error);
+                    mainContent.innerHTML = '<div class="empty-state"><div class="empty-title">档案页加载失败</div><div class="empty-desc">请刷新后重试</div></div>';
+                }
+                break;
             case 'leaderboard': Leaderboard.render(mainContent); break;
             case 'community': Community.render(mainContent); break;
             case 'collection': Collection.render(mainContent); break;
