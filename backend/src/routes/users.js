@@ -49,14 +49,22 @@ router.post('/register',
       // 创建用户
       const user = await UserModel.register({ name, className, studentId, passwordHash });
 
-      // 创建统计记录
-      UserStatsModel.initForUser(user.id);
+      // 初始化统计记录（幂等，MySQL 和内存均可用）
+      try {
+        await UserStatsModel.initForUser(user.id);
+      } catch (statsErr) {
+        console.error(`[注册] 为用户 ${user.id} 初始化统计失败:`, statsErr.message);
+        // 不阻塞注册流程，但记录错误
+      }
 
       // 生成 JWT
       const token = generateToken({ userId: user.id, name: user.name });
 
+      // 返回时附带 stats
+      const stats = await UserStatsModel.findByUserId(user.id);
+
       return created(res, {
-        user: serializeUser(user),
+        user: serializeUser(user, stats),
         token,
       }, '注册成功');
     } catch (err) {
@@ -108,14 +116,15 @@ router.post('/login/wx', (req, res) => {
 
 // ==================== 获取当前用户信息 ====================
 
-router.get('/me', authMiddleware, (req, res) => {
+router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const user = UserModel.findById(req.user.id);
+    const user = await UserModel.findById(req.user.id);
     if (!user) {
       return error(res, 404, '用户不存在');
     }
 
-    const stats = UserStatsModel.findByUserId(req.user.id);
+    // 尝试获取统计，老用户自动补建
+    const stats = await UserStatsModel.initForUser(req.user.id);
 
     return success(res, {
       user: serializeUser(user, stats),
@@ -154,6 +163,28 @@ router.put('/me', authMiddleware, (req, res) => {
   } catch (err) {
     console.error('更新用户信息失败:', err);
     return serverError(res, '更新用户信息失败');
+  }
+});
+
+// ==================== 获取用户统计 ====================
+
+router.get('/me/stats', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 检查用户是否存在
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return error(res, 404, '用户不存在');
+    }
+
+    // initForUser 幂等：老用户没有统计行时自动补建
+    const stats = await UserStatsModel.initForUser(userId);
+
+    return success(res, { stats });
+  } catch (err) {
+    console.error('获取用户统计失败:', err);
+    return serverError(res, '获取用户统计失败');
   }
 });
 

@@ -199,54 +199,252 @@ class UserModel extends BaseModel {
 
 // ==================== UserStatsModel ====================
 
+/**
+ * 统计字段白名单（camelCase API 字段 → 实际 MySQL 列名）
+ *
+ * 注意：实际 MySQL user_stats 表的列名与 schema.sql 可能不同，
+ * 这里以实际运行的表结构为准。
+ *
+ * MySQL 实际列 → API 字段映射：
+ *   total_drinks         → totalRecords           (总记录数)
+ *   total_bounties       → totalBountiesPublished  (发布悬赏数)
+ *   total_help_completed → totalBountiesCompleted  (完成悬赏数)
+ *
+ * 只允许更新这些字段，禁止直接拼接不可信列名
+ */
+const STATS_ALLOWED_FIELDS = {
+  level:                    'level',
+  xp:                       'xp',
+  total_xp:                 'total_xp',
+  continuous_days:          'continuous_days',
+  total_records:            'total_drinks',            // 实际列名
+  total_bounties_published: 'total_bounties',          // 实际列名
+  total_bounties_completed: 'total_help_completed',    // 实际列名
+};
+
+/**
+ * 将 MySQL row 的 snake_case 转换为前端 camelCase
+ * 同时将 DATE/DATETIME 安全序列化为字符串
+ * @param {Object} row - MySQL 查询返回的原始行
+ * @returns {Object} camelCase 统计对象
+ */
+function normalizeStatsRow(row) {
+  if (!row) return null;
+  const toDateStr = (val) => {
+    if (!val) return null;
+    if (val instanceof Date) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    // 字符串：取日期部分
+    const s = String(val).split('T')[0];
+    return s || null;
+  };
+
+  return {
+    userId:                  row.user_id,
+    level:                   Number(row.level) || 1,
+    xp:                      Number(row.xp) || 0,
+    totalXp:                 Number(row.total_xp) || 0,
+    continuousDays:          Number(row.continuous_days) || 0,
+    lastRecordDate:          toDateStr(row.last_record_date),
+    // 实际 MySQL 列名 → API 字段名
+    totalRecords:            Number(row.total_drinks) || 0,
+    totalBountiesPublished:  Number(row.total_bounties) || 0,
+    totalBountiesCompleted:  Number(row.total_help_completed) || 0,
+    updatedAt:               row.updated_at || null,
+  };
+}
+
 class UserStatsModel extends BaseModel {
   constructor() {
     super('user_stats');
-  }
-
-  /**
-   * 为新用户创建初始统计
-   * @param {string} userId
-   * @returns {Object}
-   */
-  initForUser(userId) {
-    const now = new Date().toISOString();
-    const stats = {
-      id: generateId(),
-      userId,
-      totalDrinks: 0,
-      totalBounties: 0,
-      totalHelpCompleted: 0,
-      totalCollections: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.create(stats);
-    return stats;
+    this.pool = getPool();
   }
 
   /**
    * 根据 userId 查找统计
-   * @param {string} userId
-   * @returns {Object|null}
+   * - MySQL 可用：从 user_stats 表查询
+   * - MySQL 不可用：回退到内存 Map
+   * @param {string|number} userId
+   * @returns {Promise<Object|null>}
    */
-  findByUserId(userId) {
-    return this.findAll({ userId })[0] || null;
+  async findByUserId(userId) {
+    // 尝试 MySQL
+    if (this.pool) {
+      try {
+        const [rows] = await this.pool.execute(
+          'SELECT * FROM user_stats WHERE user_id = ?',
+          [userId]
+        );
+        return rows[0] ? normalizeStatsRow(rows[0]) : null;
+      } catch (err) {
+        console.error('[UserStats] MySQL findByUserId 失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback
+    const stats = this.findAll({ userId })[0] || null;
+    if (!stats) return null;
+    return {
+      userId: stats.userId,
+      level: Number(stats.level) || 1,
+      xp: Number(stats.xp) || 0,
+      totalXp: Number(stats.totalXp) || 0,
+      continuousDays: Number(stats.continuousDays) || 0,
+      lastRecordDate: stats.lastRecordDate || null,
+      totalRecords: Number(stats.totalRecords) || 0,
+      totalBountiesPublished: Number(stats.totalBountiesPublished) || 0,
+      totalBountiesCompleted: Number(stats.totalBountiesCompleted) || 0,
+      updatedAt: stats.updatedAt || null,
+    };
   }
 
   /**
-   * 增加统计计数
-   * @param {string} userId
-   * @param {string} field - totalDrinks | totalBounties | totalHelpCompleted | totalCollections
-   * @param {number} amount - 增加量（默认 1）
+   * 为用户初始化统计（幂等）
+   * - 如果 user_stats 已存在，返回现有数据
+   * - 如果不存在，插入默认数据后返回
+   * - 必须兼容旧用户
+   * @param {string|number} userId
+   * @returns {Promise<Object>}
    */
-  increment(userId, field, amount = 1) {
+  async initForUser(userId) {
+    // 先查询是否已存在
+    const existing = await this.findByUserId(userId);
+    if (existing) return existing;
+
+    // 不存在则创建
+    const now = getMysqlDateTime();
+    if (this.pool) {
+      try {
+        await this.pool.execute(
+          `INSERT INTO user_stats (id, user_id, level, xp, total_xp, continuous_days,
+             total_drinks, total_bounties, total_help_completed, total_collections,
+             created_at, updated_at)
+           VALUES (?, ?, 1, 0, 0, 0, 0, 0, 0, 0, ?, ?)`,
+          [generateId(), userId, now, now]
+        );
+        console.log(`[UserStats] 为用户 ${userId} 创建统计行`);
+        return await this.findByUserId(userId);
+      } catch (err) {
+        // 如果是并发插入导致的重复键错误，重新查询
+        if (err.code === 'ER_DUP_ENTRY') {
+          console.log(`[UserStats] 用户 ${userId} 统计行已存在（并发创建），返回现有数据`);
+          return await this.findByUserId(userId);
+        }
+        console.error('[UserStats] MySQL initForUser 失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback
+    const stats = {
+      id: generateId(),
+      userId,
+      level: 1,
+      xp: 0,
+      totalXp: 0,
+      continuousDays: 0,
+      lastRecordDate: null,
+      totalRecords: 0,
+      totalBountiesPublished: 0,
+      totalBountiesCompleted: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.create(stats);
+    return this.findByUserId(userId);
+  }
+
+  /**
+   * 更新统计字段（白名单校验）
+   * - 只允许更新 STATS_ALLOWED_FIELDS 中的字段
+   * - 禁止直接拼接不可信列名
+   * @param {string|number} userId
+   * @param {Object} updates - camelCase API 字段名 → 值
+   * @returns {Promise<Object|null>}
+   */
+  async updateByUserId(userId, updates) {
+    // 白名单过滤：camelCase API 字段 → 实际 MySQL 列名
+    const setClauses = [];
+    const values = [];
+    for (const [apiKey, colName] of Object.entries(STATS_ALLOWED_FIELDS)) {
+      if (updates[apiKey] !== undefined) {
+        setClauses.push(`${colName} = ?`);
+        values.push(updates[apiKey]);
+      }
+    }
+
+    if (setClauses.length === 0) return this.findByUserId(userId);
+
+    setClauses.push('updated_at = ?');
+    values.push(getMysqlDateTime());
+    values.push(userId);
+
+    if (this.pool) {
+      try {
+        await this.pool.execute(
+          `UPDATE user_stats SET ${setClauses.join(', ')} WHERE user_id = ?`,
+          values
+        );
+        return await this.findByUserId(userId);
+      } catch (err) {
+        console.error('[UserStats] MySQL updateByUserId 失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback
     const stats = this.findByUserId(userId);
     if (!stats) return null;
-    stats[field] = (stats[field] || 0) + amount;
+    for (const [apiKey] of Object.entries(STATS_ALLOWED_FIELDS)) {
+      if (updates[apiKey] !== undefined) {
+        stats[apiKey] = updates[apiKey];
+      }
+    }
     stats.updatedAt = new Date().toISOString();
     this.update(stats.id, stats);
-    return stats;
+    return this.findByUserId(userId);
+  }
+
+  /**
+   * 原子自增统计字段（白名单校验）
+   * - 使用 SQL 原子自增，避免并发覆盖
+   * - 更新后返回最新统计
+   * @param {string|number} userId
+   * @param {string} field - camelCase API 字段名（仅允许 STATS_ALLOWED_FIELDS 中的键）
+   * @param {number} amount - 增加量（默认 1）
+   * @returns {Promise<Object|null>}
+   */
+  async increment(userId, field, amount = 1) {
+    const colName = STATS_ALLOWED_FIELDS[field];
+    if (!colName) {
+      console.error(`[UserStats] increment 非法字段: ${field}`);
+      return null;
+    }
+
+    // 确保统计行存在
+    await this.initForUser(userId);
+
+    if (this.pool) {
+      try {
+        await this.pool.execute(
+          `UPDATE user_stats SET ${colName} = ${colName} + ?, updated_at = ? WHERE user_id = ?`,
+          [amount, getMysqlDateTime(), userId]
+        );
+        return await this.findByUserId(userId);
+      } catch (err) {
+        console.error('[UserStats] MySQL increment 失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback
+    const stats = this.findByUserId(userId);
+    if (!stats) return null;
+    stats[field] = (Number(stats[field]) || 0) + amount;
+    stats.updatedAt = new Date().toISOString();
+    this.update(stats.id, stats);
+    return this.findByUserId(userId);
   }
 }
 

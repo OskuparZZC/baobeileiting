@@ -12,13 +12,19 @@ const { getXPLevelInfo } = require('../config/xpLevels');
 /**
  * 将后端用户对象序列化为前端兼容格式
  * @param {Object} user    - 后端 users 记录
- * @param {Object} stats   - 后端 user_stats 记录（可选）
+ * @param {Object} stats   - 后端 user_stats 记录（可选，camelCase 格式）
  * @returns {Object} 前端兼容的用户对象
  */
 function serializeUser(user, stats = null) {
   if (!user) return null;
 
-  const levelInfo = getXPLevelInfo(user.xp || 0);
+  // XP 优先从 stats 读取（user_stats 表是 XP 的单一真实来源）
+  // 如果 stats 不可用，回退到 user 对象上的字段（兼容旧代码）
+  const totalXp = stats ? (stats.totalXp || 0) : (user.totalXp || user.xp || 0);
+  const currentXp = stats ? (stats.xp || 0) : (user.xp || 0);
+  const level = stats ? (stats.level || 1) : (user.level || 1);
+
+  const levelInfo = getXPLevelInfo(totalXp);
 
   /**
    * 将 createdAt / updatedAt 统一转为日期字符串 (YYYY-MM-DD)
@@ -49,13 +55,13 @@ function serializeUser(user, stats = null) {
     // 时间相关
     joinDate: user.joinDate || toDateStr(user.createdAt),
     registerDate: user.registerDate || toDateStr(user.createdAt),
-    lastLoginDate: user.lastLoginDate || '',
+    lastLoginDate: stats ? (stats.lastRecordDate || '') : (user.lastLoginDate || ''),
 
-    // XP / 等级相关
-    level: user.level || 1,
-    xp: user.xp || 0,
-    totalXp: user.xp || 0,
-    continuousDays: user.streak || 0,
+    // XP / 等级相关（优先从 stats 读取）
+    level: level,
+    xp: currentXp,
+    totalXp: totalXp,
+    continuousDays: stats ? (stats.continuousDays || 0) : (user.streak || 0),
 
     // 等级信息（动态计算）
     levelInfo: {
@@ -69,12 +75,16 @@ function serializeUser(user, stats = null) {
     // 微信预留
     wx_openid: user.wx_openid || null,
 
-    // 统计（如果有 stats）
+    // 统计（新的 camelCase 格式）
     stats: stats ? {
-      totalDrinks: stats.totalDrinks || 0,
-      totalBounties: stats.totalBounties || 0,
-      totalHelpCompleted: stats.totalHelpCompleted || 0,
-      totalCollections: stats.totalCollections || 0,
+      level: stats.level || 1,
+      xp: stats.xp || 0,
+      totalXp: stats.totalXp || 0,
+      continuousDays: stats.continuousDays || 0,
+      lastRecordDate: stats.lastRecordDate || null,
+      totalRecords: stats.totalRecords || 0,
+      totalBountiesPublished: stats.totalBountiesPublished || 0,
+      totalBountiesCompleted: stats.totalBountiesCompleted || 0,
     } : null,
 
     // 元数据
