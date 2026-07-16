@@ -185,6 +185,42 @@ const Profile = {
             </div>
         `;
 
+        // 账号与安全卡片（仅已认证用户显示）
+        if (App.isAuthenticated) {
+            container.innerHTML += `
+                <div class="card account-security-card mb-lg">
+                    <div class="card-header">
+                        <span class="card-title">🔒 账号与安全</span>
+                    </div>
+                    <div class="security-actions">
+                        <button class="security-action" id="changePasswordBtn">
+                            <div class="security-action-content">
+                                <div class="security-action-icon">
+                                    <i class="fas fa-key"></i>
+                                </div>
+                                <div class="security-action-text">
+                                    <span class="security-action-label">修改密码</span>
+                                    <span class="security-action-desc">更新你的登录密码</span>
+                                </div>
+                            </div>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button class="security-action security-action-danger" id="logoutBtn">
+                            <div class="security-action-content">
+                                <div class="security-action-icon security-action-icon-danger">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                </div>
+                                <div class="security-action-text">
+                                    <span class="security-action-label">退出登录</span>
+                                    <span class="security-action-desc">退出当前认证账号</span>
+                                </div>
+                            </div>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
         this.bindEvents();
         this.addStyles();
     },
@@ -196,6 +232,232 @@ const Profile = {
                 App.openUserModal();
             });
         }
+
+        // 修改密码按钮
+        const changePwdBtn = document.getElementById('changePasswordBtn');
+        if (changePwdBtn) {
+            changePwdBtn.addEventListener('click', () => this._openPasswordModal());
+        }
+
+        // 退出登录按钮
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this._handleLogout());
+        }
+
+        // 密码模态框事件（仅绑定一次）
+        this._bindPasswordModal();
+    },
+
+    // ===== 密码修改模态框 =====
+
+    _passwordModalBound: false,
+    _passwordLoading: false,
+
+    _bindPasswordModal() {
+        if (this._passwordModalBound) return;
+        this._passwordModalBound = true;
+
+        const modal = document.getElementById('passwordModal');
+        if (!modal) return;
+
+        const closeBtn = document.getElementById('closePasswordModal');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this._closePasswordModal());
+        }
+
+        // 点击遮罩关闭
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal && !this._passwordLoading) {
+                this._closePasswordModal();
+            }
+        });
+
+        // ESC 关闭
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active') && !this._passwordLoading) {
+                this._closePasswordModal();
+            }
+        });
+
+        // 表单提交
+        const form = document.getElementById('passwordForm');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this._submitPasswordChange();
+            });
+        }
+    },
+
+    _openPasswordModal() {
+        const modal = document.getElementById('passwordModal');
+        if (!modal) return;
+
+        // 清理输入
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmPassword').value = '';
+
+        // 清理错误
+        this._clearPasswordError();
+
+        // 恢复按钮
+        this._setPasswordLoading(false);
+
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    },
+
+    _closePasswordModal() {
+        const modal = document.getElementById('passwordModal');
+        if (!modal) return;
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+
+        // 清理
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmPassword').value = '';
+        this._clearPasswordError();
+        this._setPasswordLoading(false);
+    },
+
+    _clearPasswordError() {
+        const errEl = document.getElementById('passwordError');
+        if (errEl) {
+            errEl.style.display = 'none';
+            errEl.textContent = '';
+        }
+    },
+
+    _showPasswordError(message) {
+        const errEl = document.getElementById('passwordError');
+        if (errEl) {
+            errEl.textContent = message;
+            errEl.style.display = 'block';
+        }
+    },
+
+    _setPasswordLoading(loading) {
+        this._passwordLoading = loading;
+        const btn = document.getElementById('submitPasswordBtn');
+        const text = document.getElementById('passwordBtnText');
+        const spinner = document.getElementById('passwordSpinner');
+
+        if (btn) btn.disabled = loading;
+        if (text) text.style.display = loading ? 'none' : '';
+        if (spinner) spinner.style.display = loading ? 'inline' : 'none';
+    },
+
+    async _submitPasswordChange() {
+        if (this._passwordLoading) return;
+
+        const currentPassword = document.getElementById('currentPassword').value;
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+
+        // 前端验证
+        if (!currentPassword) {
+            this._showPasswordError('请输入当前密码');
+            return;
+        }
+        if (!newPassword) {
+            this._showPasswordError('请输入新密码');
+            return;
+        }
+        if (newPassword.length < 6 || newPassword.length > 72) {
+            this._showPasswordError('新密码长度需要 6~72 位');
+            return;
+        }
+        if (newPassword === currentPassword) {
+            this._showPasswordError('新密码不能与当前密码相同');
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            this._showPasswordError('两次输入的新密码不一致');
+            return;
+        }
+
+        // 获取当前用户身份
+        const currentUser = App.getCurrentUser?.();
+        const backendAuthEnabled = api.auth.backendAuthEnabled;
+
+        if (!currentUser) {
+            this._showPasswordError('当前用户信息缺失，请重新登录');
+            return;
+        }
+
+        // 正式 JWT 模式：无需传 xUserId（request() 会使用 Bearer token）
+        // 开发模式：需要传 _backendId 作为 x-user-id
+        let requestOptions = {};
+        if (backendAuthEnabled === false) {
+            if (!currentUser._backendId) {
+                this._showPasswordError('当前账号身份信息缺失，请重新登录');
+                return;
+            }
+            requestOptions = { xUserId: currentUser._backendId };
+        }
+
+        this._clearPasswordError();
+        this._setPasswordLoading(true);
+
+        try {
+            await api.users.changePassword({
+                currentPassword,
+                newPassword,
+                confirmPassword,
+            }, requestOptions);
+
+            // 修改成功：关闭模态框
+            this._closePasswordModal();
+
+            // 提示成功
+            App.showToast('密码修改成功，请使用新密码登录', 2500);
+
+            // 延迟退出登录，让用户看到提示
+            setTimeout(() => {
+                App.logout();
+            }, 1500);
+
+        } catch (err) {
+            // 根据不同错误类型显示提示
+            if (err.code === 401) {
+                // 401 只在真正使用 Bearer 认证时才是 token 过期
+                if (backendAuthEnabled === true) {
+                    this._showPasswordError('登录已过期，请重新登录');
+                    setTimeout(() => {
+                        this._closePasswordModal();
+                        App.logout();
+                    }, 1500);
+                } else {
+                    // 开发模式 401：身份验证失败，不退出
+                    this._showPasswordError(err.message || '当前账号身份验证失败，请重新进入账号');
+                }
+            } else if (err.code === 400) {
+                this._showPasswordError(err.message || '当前密码不正确');
+            } else if (err.isNetworkError) {
+                if (err.isTimeout) {
+                    this._showPasswordError('请求超时，请稍后重试');
+                } else {
+                    this._showPasswordError('无法连接服务器，请稍后重试');
+                }
+            } else {
+                this._showPasswordError(err.message || '修改密码失败，请稍后重试');
+            }
+        } finally {
+            this._setPasswordLoading(false);
+        }
+    },
+
+    // ===== 退出登录 =====
+
+    _handleLogout() {
+        if (!confirm('确定要退出当前账号吗？')) return;
+
+        // 保存当前数据
+        App.saveCurrentUserData();
+        App.logout();
     },
 
     renderPersonalityDetail(personality) {

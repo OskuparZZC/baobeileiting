@@ -192,6 +192,9 @@ const api = {
     const fetchOptions = { method, headers };
     if (body) fetchOptions.body = JSON.stringify(body);
 
+    // 记录本次请求是否实际发送了 Bearer token（用于 401 判断）
+    const usedBearerAuth = Boolean(headers['Authorization']);
+
     const effectiveTimeout = (timeout != null) ? timeout : DEFAULT_TIMEOUT;
 
     let res;
@@ -213,9 +216,12 @@ const api = {
       throw err;
     }
 
-    // 401 统一处理：清除 token（这是 HTTP 错误，不是网络错误）
+    // 401 处理：只有本次请求真正发送了 Bearer token 时才清除 token
+    // 开发模式下使用 x-user-id 导致的 401（如缺少 x-user-id）不清除 token
     if (res.status === 401) {
-      this.auth.clearToken();
+      if (usedBearerAuth) {
+        this.auth.clearToken();
+      }
       const err = new Error(json.message || '认证已失效，请重新登录');
       err.code = 401;
       err.status = 401;
@@ -289,10 +295,11 @@ const api = {
     /**
      * 修改密码
      * @param {Object} data - { currentPassword, newPassword, confirmPassword }
+     * @param {Object} [options] - { xUserId? }
      * @returns {Object} { code, message, data }
      */
-    changePassword(data) {
-      return api.put('/users/me/password', data);
+    changePassword(data, options = {}) {
+      return api.put('/users/me/password', data, options);
     },
 
     /**
