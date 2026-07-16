@@ -586,6 +586,169 @@ class UserStatsModel extends BaseModel {
     this.update(stats.id, stats);
     return this.findByUserId(userId);
   }
+
+  /**
+   * 排行榜查询：按 XP 总榜排序
+   *
+   * 排序规则：
+   *   1. total_xp DESC
+   *   2. total_drinks DESC
+   *   3. users.created_at ASC
+   *   4. users.id ASC（最终稳定排序）
+   *
+   * 排除条件：total_xp = 0 AND total_drinks = 0
+   *
+   * 返回结构：
+   *   {
+   *     entries: [{ rank, userId, name, className, avatar, level, totalXp, totalRecords,
+   *                continuousDays, totalBountiesCompleted, createdAt, isCurrentUser }],
+   *     currentUser: { rank, ... } | null,
+   *     total: number
+   *   }
+   *
+   * @param {Object} options - { limit?, currentUserId? }
+   * @returns {Promise<Object>}
+   */
+  async getLeaderboard(options = {}) {
+    const limit = Math.max(1, Math.min(100, Number(options.limit) || 50));
+    const currentUserId = options.currentUserId || null;
+
+    if (this.pool) {
+      try {
+        // 核心排行榜查询：JOIN users + user_stats，排除空白用户
+        // 注意：使用 query() 而非 execute()，因为 mysql2 prepared statement
+        // 不支持 LIMIT ? 语法（ER_WRONG_ARGUMENTS）
+        // limit 已在上方校验为安全整数，可以安全内联
+        const [rows] = await this.pool.query(
+          `SELECT
+            u.id          AS user_id,
+            u.name        AS name,
+            u.class_name  AS class_name,
+            u.avatar      AS avatar,
+            us.level      AS level,
+            us.total_xp   AS total_xp,
+            us.total_drinks AS total_drinks,
+            us.continuous_days AS continuous_days,
+            us.total_help_completed AS total_help_completed,
+            u.created_at  AS created_at
+          FROM user_stats us
+          INNER JOIN users u ON u.id = us.user_id
+          WHERE (us.total_xp > 0 OR us.total_drinks > 0)
+          ORDER BY
+            us.total_xp DESC,
+            us.total_drinks DESC,
+            u.created_at ASC,
+            u.id ASC
+          LIMIT ${limit}`
+        );
+
+        // 映射行数据
+        const entries = rows.map((row, index) => ({
+          rank: index + 1,
+          userId: row.user_id,
+          name: row.name,
+          className: row.class_name || '',
+          avatar: row.avatar || '',
+          level: getXPLevelInfo(Number(row.total_xp) || 0).level,
+          totalXp: Number(row.total_xp) || 0,
+          totalRecords: Number(row.total_drinks) || 0,
+          continuousDays: Number(row.continuous_days) || 0,
+          totalBountiesCompleted: Number(row.total_help_completed) || 0,
+          createdAt: row.created_at,
+          isCurrentUser: row.user_id === currentUserId,
+        }));
+
+        // 查询总有效用户数
+        const [countRows] = await this.pool.execute(
+          `SELECT COUNT(*) AS cnt FROM user_stats
+           WHERE total_xp > 0 OR total_drinks > 0`
+        );
+        const total = Number(countRows[0].cnt) || 0;
+
+        // 当前用户处理
+        let currentUser = null;
+        if (currentUserId) {
+          // 先在 entries 中找
+          const inEntries = entries.find(e => e.userId === currentUserId);
+          if (inEntries) {
+            currentUser = { ...inEntries };
+          } else {
+            // 不在 Top N，查询当前用户的 totalXp、totalRecords 和 createdAt
+            const [selfRows] = await this.pool.execute(
+              `SELECT us.total_xp, us.total_drinks, u.created_at
+               FROM user_stats us
+               INNER JOIN users u ON u.id = us.user_id
+               WHERE us.user_id = ?`,
+              [currentUserId]
+            );
+
+            if (selfRows[0]) {
+              const myXp = Number(selfRows[0].total_xp) || 0;
+              const myDrinks = Number(selfRows[0].total_drinks) || 0;
+              const myCreatedAt = selfRows[0].created_at;
+
+              // 用户为空白则不计算排名
+              if (myXp > 0 || myDrinks > 0) {
+                // 计算排名：排在该用户前面的有效用户数 + 1
+                // 使用变量方式避免重复子查询
+                const [rankRows] = await this.pool.execute(
+                  `SELECT COUNT(*) + 1 AS rank FROM user_stats us
+                   INNER JOIN users u ON u.id = us.user_id
+                   WHERE (us.total_xp > 0 OR us.total_drinks > 0)
+                     AND (
+                       us.total_xp > ?
+                       OR (us.total_xp = ? AND us.total_drinks > ?)
+                       OR (us.total_xp = ? AND us.total_drinks = ? AND u.created_at < ?)
+                       OR (us.total_xp = ? AND us.total_drinks = ? AND u.created_at = ? AND u.id < ?)
+                     )`,
+                  [myXp, myXp, myDrinks, myXp, myDrinks, myCreatedAt, myXp, myDrinks, myCreatedAt, currentUserId]
+                );
+                const rank = Number(rankRows[0].rank) || 0;
+
+                // 查询当前用户详情
+                const [userRows] = await this.pool.execute(
+                  `SELECT
+                    u.id AS user_id, u.name, u.class_name, u.avatar,
+                    us.level, us.total_xp, us.total_drinks,
+                    us.continuous_days, us.total_help_completed,
+                    u.created_at
+                  FROM users u
+                  LEFT JOIN user_stats us ON u.id = us.user_id
+                  WHERE u.id = ?`,
+                  [currentUserId]
+                );
+
+                if (userRows[0]) {
+                  const r = userRows[0];
+                  currentUser = {
+                    rank,
+                    userId: r.user_id,
+                    name: r.name,
+                    className: r.class_name || '',
+                    avatar: r.avatar || '',
+                    level: getXPLevelInfo(Number(r.total_xp) || 0).level,
+                    totalXp: Number(r.total_xp) || 0,
+                    totalRecords: Number(r.total_drinks) || 0,
+                    continuousDays: Number(r.continuous_days) || 0,
+                    totalBountiesCompleted: Number(r.total_help_completed) || 0,
+                    createdAt: r.created_at,
+                    isCurrentUser: true,
+                  };
+                }
+              }
+            }
+          }
+        }
+
+        return { entries, currentUser, total };
+      } catch (err) {
+        console.error('[Leaderboard] MySQL 查询失败，回退内存:', err.message);
+      }
+    }
+
+    // 内存 fallback：返回空排行榜
+    return { entries: [], currentUser: null, total: 0 };
+  }
 }
 
 // ==================== XpLogModel ====================
