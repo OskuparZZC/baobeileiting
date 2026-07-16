@@ -7,12 +7,19 @@
  * POST   /api/users/login/wx      - 微信登录（预留 501）
  * GET    /api/users/me            - 获取当前用户信息  [auth]
  * PUT    /api/users/me            - 更新用户信息      [auth]
+ * PUT    /api/users/me/password   - 修改密码          [auth]  ← Phase 4.4.1 新增
  * POST   /api/users/me/checkin    - 每日签到          [auth]
  * POST   /api/users/me/events     - 事件驱动 XP      [auth]
  * GET    /api/users/me/xp-logs    - XP 流水历史      [auth]
  *
  * 修订 v3：注册不再检查 name 唯一性，仅检查 studentId 唯一性
  *         允许同名不同学号的用户存在
+ *
+ * 修订 v4（Phase 4.4.1）：
+ *         - 注册/登录增加 trim 和长度校验
+ *         - 登录使用认证专用查询方法 findAuthByStudentId
+ *         - findById / findByStudentId 不再返回 passwordHash
+ *         - 新增 PUT /api/users/me/password 修改密码接口
  */
 
 const express = require('express');
@@ -29,6 +36,31 @@ const { getEventConfig, VALID_SOURCE_TYPES, XP_EVENTS } = require('../config/xpE
 
 const SALT_ROUNDS = 10;
 
+// 字段长度限制
+const LIMITS = {
+  name: { min: 1, max: 50 },
+  className: { min: 0, max: 100 },
+  studentId: { min: 1, max: 50 },
+  password: { min: 6, max: 72 },
+};
+
+/**
+ * 校验字符串长度
+ * @param {string} val - 待校验字符串
+ * @param {{ min: number, max: number }} limits - 长度限制
+ * @param {string} label - 字段中文名
+ * @returns {string|null} 错误信息，无错误返回 null
+ */
+function checkLength(val, limits, label) {
+  if (typeof val !== 'string') return `${label} 格式不正确`;
+  if (val.length < limits.min) {
+    if (limits.min === 1) return `${label} 不能为空`;
+    return `${label} 至少需要${limits.min}位`;
+  }
+  if (val.length > limits.max) return `${label} 不能超过${limits.max}位`;
+  return null;
+}
+
 // ==================== 注册 ====================
 
 router.post('/register',
@@ -36,9 +68,24 @@ router.post('/register',
   validate.passwordRules,
   async (req, res) => {
     try {
-      const { name, className, studentId, password } = req.body;
+      // trim 所有字符串字段
+      const name = (req.body.name || '').trim();
+      const className = (req.body.className || '').trim();
+      const studentId = (req.body.studentId || '').trim();
+      const password = req.body.password; // 已由 passwordRules 中间件 trim
 
-      // 学号唯一性检查（name 不要求唯一，允许同名不同学号）
+      // 字段长度校验
+      const nameErr = checkLength(name, LIMITS.name, '姓名');
+      if (nameErr) return error(res, 400, nameErr);
+
+      if (className.length > LIMITS.className.max) {
+        return error(res, 400, `班级不能超过${LIMITS.className.max}位`);
+      }
+
+      const sidErr = checkLength(studentId, LIMITS.studentId, '学号');
+      if (sidErr) return error(res, 400, sidErr);
+
+      // 学号唯一性检查（使用安全查询方法，不需要 passwordHash）
       if (await UserModel.findByStudentId(studentId)) {
         return error(res, 409, '该学号已被注册');
       }
@@ -49,7 +96,7 @@ router.post('/register',
       // 创建用户
       const user = await UserModel.register({ name, className, studentId, passwordHash });
 
-      // 初始化统计记录（幂等，MySQL 和内存均可用）
+      // 初始化统计记录（幂等）
       try {
         await UserStatsModel.initForUser(user.id);
       } catch (statsErr) {
@@ -57,7 +104,7 @@ router.post('/register',
         // 不阻塞注册流程，但记录错误
       }
 
-      // 生成 JWT
+      // 生成 JWT（只写入 userId 和 name）
       const token = generateToken({ userId: user.id, name: user.name });
 
       // 返回时附带 stats
@@ -80,25 +127,47 @@ router.post('/login',
   validate.required(['studentId', 'password']),
   async (req, res) => {
     try {
-      const { studentId, password } = req.body;
+      const studentId = (req.body.studentId || '').trim();
+      const password = (req.body.password || '').trim();
 
-      // 通过学号查找用户
-      const user = await UserModel.findByStudentId(studentId);
-      if (!user) {
+      if (!studentId || !password) {
+        return error(res, 401, '学号或密码错误');
+      }
+
+      // 使用认证专用方法获取 passwordHash
+      const authUser = await UserModel.findAuthByStudentId(studentId);
+      if (!authUser || !authUser.passwordHash) {
+        // 用户不存在或未设置密码 → 统一错误消息，不泄露用户是否存在
         return error(res, 401, '学号或密码错误');
       }
 
       // 验证密码
-      const isMatch = bcrypt.compareSync(password, user.passwordHash);
+      const isMatch = bcrypt.compareSync(password, authUser.passwordHash);
       if (!isMatch) {
         return error(res, 401, '学号或密码错误');
       }
 
-      // 生成 JWT
-      const token = generateToken({ userId: user.id, name: user.name });
+      // 生成 JWT（只写入 userId 和 name，不含敏感字段）
+      const token = generateToken({ userId: authUser.id, name: authUser.name });
+
+      // 确保 user_stats 存在（老用户可能没有统计行）
+      await UserStatsModel.initForUser(authUser.id);
+      const stats = await UserStatsModel.findByUserId(authUser.id);
+
+      // 返回安全用户（不含 passwordHash）
+      const safeUser = serializeUser({
+        id: authUser.id,
+        name: authUser.name,
+        nickname: authUser.nickname,
+        className: authUser.className,
+        studentId: authUser.studentId,
+        avatar: authUser.avatar,
+        createdAt: authUser.createdAt,
+        updatedAt: authUser.updatedAt,
+      }, stats);
 
       return success(res, {
-        user: serializeUser(user),
+        user: safeUser,
         token,
       }, '登录成功');
     } catch (err) {
@@ -113,6 +182,88 @@ router.post('/login',
 router.post('/login/wx', (req, res) => {
   return error(res, 501, '微信登录功能开发中');
 });
+
+// ==================== 修改密码 ====================
+
+/**
+ * PUT /api/users/me/password
+ *
+ * 修改当前登录用户的密码。
+ * 必须通过 authMiddleware 认证，仅允许修改自己的密码。
+ *
+ * 请求体：
+ *   { currentPassword, newPassword, confirmPassword }
+ *
+ * 校验：
+ *   - 三个字段必填
+ *   - newPassword === confirmPassword
+ *   - 新密码 6~72 位
+ *   - 新密码不能全部为数字
+ *   - 新密码不能等于当前密码
+ *   - 使用 bcrypt.compare 验证 currentPassword
+ *   - 不允许通过 body.userId 修改他人密码
+ */
+router.put('/me/password',
+  authMiddleware,
+  validate.required(['currentPassword', 'newPassword', 'confirmPassword']),
+  async (req, res) => {
+    try {
+      const currentPassword = (req.body.currentPassword || '').trim();
+      const newPassword = (req.body.newPassword || '').trim();
+      const confirmPassword = (req.body.confirmPassword || '').trim();
+
+      // 确认两次新密码一致
+      if (newPassword !== confirmPassword) {
+        return error(res, 400, '两次输入的新密码不一致');
+      }
+
+      // 新密码不能等于当前密码
+      if (newPassword === currentPassword) {
+        return error(res, 400, '新密码不能与当前密码相同');
+      }
+
+      // 新密码长度校验
+      if (newPassword.length < LIMITS.password.min) {
+        return error(res, 400, `新密码至少需要${LIMITS.password.min}位`);
+      }
+      if (newPassword.length > LIMITS.password.max) {
+        return error(res, 400, `新密码不能超过${LIMITS.password.max}位`);
+      }
+
+      // 新密码不能全部为数字
+      if (/^\d+$/.test(newPassword)) {
+        return error(res, 400, '新密码不能全部为数字');
+      }
+
+      // 使用认证专用方法获取 passwordHash
+      const authUser = await UserModel.findAuthById(req.user.id);
+      if (!authUser) {
+        return error(res, 404, '用户不存在');
+      }
+
+      // 验证当前密码
+      if (!authUser.passwordHash) {
+        return error(res, 400, '当前账号未设置密码，无法修改');
+      }
+
+      const isMatch = bcrypt.compareSync(currentPassword, authUser.passwordHash);
+      if (!isMatch) {
+        return error(res, 400, '当前密码错误');
+      }
+
+      // 哈希新密码
+      const newPasswordHash = bcrypt.hashSync(newPassword, SALT_ROUNDS);
+
+      // 更新密码（参数化查询，仅更新当前用户）
+      await UserModel.updatePassword(req.user.id, newPasswordHash);
+
+      return success(res, { success: true }, '密码修改成功');
+    } catch (err) {
+      console.error('修改密码失败:', err);
+      return serverError(res, '修改密码失败');
+    }
+  }
+);
 
 // ==================== 获取当前用户信息 ====================
 

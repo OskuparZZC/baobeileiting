@@ -91,12 +91,12 @@ function maxLength(field, max, source = 'body') {
 }
 
 /**
- * 密码规则校验（修订2）
+ * 密码规则校验（修订3）
  *
  * 规则：
  * - 去除首尾空格后校验
  * - 最少 6 位
- * - 最多 50 位
+ * - 最多 72 位（bcrypt 对超长密码有实际限制）
  * - 不能全部为数字
  *
  * 示例：
@@ -112,8 +112,8 @@ function passwordRules(req, res, next) {
   if (pwd.length < 6) {
     return error(res, 400, '密码至少需要6位');
   }
-  if (pwd.length > 50) {
-    return error(res, 400, '密码不能超过50位');
+  if (pwd.length > 72) {
+    return error(res, 400, '密码不能超过72位');
   }
   if (/^\d+$/.test(pwd)) {
     return error(res, 400, '密码不能全部为数字');

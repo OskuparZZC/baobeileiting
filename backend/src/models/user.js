@@ -83,11 +83,62 @@ class UserModel extends BaseModel {
   }
 
   /**
-   * 根据 ID 查找用户
+   * 将 MySQL row 映射为安全用户对象（不含 passwordHash）
+   * @param {Object} r - MySQL 行数据
+   * @returns {Object}
+   */
+  _mapSafeUser(r) {
+    return {
+      id: r.id,
+      name: r.name,
+      nickname: r.nickname,
+      className: r.class_name,
+      studentId: r.student_id,
+      avatar: r.avatar,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  /**
+   * 根据 ID 查找用户（安全版本，不含 passwordHash）
+   * 用于普通业务接口
    * @param {string} id
    * @returns {Object|null}
    */
   async findById(id) {
+    const [rows] = await this.pool.execute(
+      'SELECT id, name, nickname, class_name, student_id, avatar, created_at, updated_at FROM users WHERE id = ?',
+      [id]
+    );
+    if (!rows[0]) return null;
+    return this._mapSafeUser(rows[0]);
+  }
+
+  /**
+   * 根据学号查找用户（安全版本，不含 passwordHash）
+   * 用于注册查重等不需要密码的场景
+   * @param {string} studentId
+   * @returns {Object|null}
+   */
+  async findByStudentId(studentId) {
+    const [rows] = await this.pool.execute(
+      'SELECT id, name, nickname, class_name, student_id, avatar, created_at, updated_at FROM users WHERE student_id = ?',
+      [studentId]
+    );
+    if (!rows[0]) return null;
+    return this._mapSafeUser(rows[0]);
+  }
+
+  // ==================== 认证专用查询方法（含 passwordHash） ====================
+
+  /**
+   * 根据 ID 查找用户（认证版本，包含 passwordHash）
+   * 仅用于登录、修改密码等认证流程
+   * @param {string} id
+   * @returns {Object|null}
+   */
+  async findAuthById(id) {
     const [rows] = await this.pool.execute(
       'SELECT * FROM users WHERE id = ?',
       [id]
@@ -108,12 +159,12 @@ class UserModel extends BaseModel {
   }
 
   /**
-   * 根据学号查找用户（精确匹配，保证唯一）
-   * 用于登录
+   * 根据学号查找用户（认证版本，包含 passwordHash）
+   * 仅用于登录认证流程
    * @param {string} studentId
    * @returns {Object|null}
    */
-  async findByStudentId(studentId) {
+  async findAuthByStudentId(studentId) {
     const [rows] = await this.pool.execute(
       'SELECT * FROM users WHERE student_id = ?',
       [studentId]
@@ -131,6 +182,20 @@ class UserModel extends BaseModel {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  /**
+   * 更新用户密码（参数化查询，仅更新当前用户）
+   * @param {string} userId
+   * @param {string} passwordHash - bcrypt 哈希后的密码
+   * @returns {Promise<boolean>}
+   */
+  async updatePassword(userId, passwordHash) {
+    await this.pool.execute(
+      'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
+      [passwordHash, getMysqlDateTime(), userId]
+    );
+    return true;
   }
 
   /**

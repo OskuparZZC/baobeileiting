@@ -25,7 +25,7 @@ const { error } = require('../utils/response');
 /**
  * JWT 认证处理
  */
-function jwtAuth(req, res, next) {
+async function jwtAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return error(res, 401, '未提供认证令牌');
@@ -34,6 +34,13 @@ function jwtAuth(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const payload = jwt.verify(token, config.jwt.secret);
+
+    // 验证 JWT 中的用户是否真实存在（防止已删除用户的旧 token 被继续使用）
+    const user = await UserModel.findById(payload.userId);
+    if (!user) {
+      return error(res, 401, '用户不存在或已被删除');
+    }
+
     req.user = { id: payload.userId, name: payload.name };
     next();
   } catch (err) {
@@ -92,7 +99,20 @@ function authMiddleware(req, res, next) {
  * @returns {string} JWT token
  */
 function generateToken(payload) {
-  return jwt.sign(payload, config.jwt.secret, {
+  // 生产环境安全检查：禁止使用弱密钥
+  if (config.nodeEnv === 'production' && config.isJwtSecretWeak()) {
+    throw new Error(
+      '[安全错误] 生产环境禁止使用默认 JWT_SECRET。请在 .env 中设置强密钥。'
+    );
+  }
+
+  // 只允许写入 userId 和 name，防止敏感信息泄露
+  const safePayload = {
+    userId: payload.userId,
+    name: payload.name,
+  };
+
+  return jwt.sign(safePayload, config.jwt.secret, {
     expiresIn: config.jwt.expiresIn,
   });
 }

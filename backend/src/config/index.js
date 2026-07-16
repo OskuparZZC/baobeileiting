@@ -31,6 +31,24 @@ const config = {
   },
 
   /**
+   * 生产环境 JWT_SECRET 安全检查
+   *
+   * 如果 NODE_ENV=production 且 JWT_SECRET 仍是默认弱密钥：
+   *   后端启动时必须明确报错，禁止静默使用默认密钥。
+   *
+   * 开发环境允许使用默认密钥。
+   */
+  isJwtSecretWeak: function() {
+    const secret = process.env.JWT_SECRET || '';
+    const weakSecrets = [
+      '',
+      'dev-secret-change-in-production',
+      'dev-secret-do-not-use-in-production',
+    ];
+    return weakSecrets.includes(secret);
+  },
+
+  /**
    * 认证模式开关
    *
    * 行为由 auth 中间件控制：
