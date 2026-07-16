@@ -275,43 +275,12 @@ const App = {
         } catch (e) {
             console.warn('加载用户数据失败', e);
         }
-        // 如果没有用户数据，用预设模板初始化
+        // Phase 4.4.3.3：不再自动使用 userTemplates 生成演示账号
+        // 无认证时必须显示登录页，不可自动创建可进入的演示用户
+        // 旧数据保留在 localStorage 中用于历史迁移/备份
         if (!this.users || Object.keys(this.users).length === 0) {
             this.users = {};
-            userTemplates.forEach((tmpl, idx) => {
-                const uid = 'user_' + (idx + 1);
-                const now = new Date();
-                const todayStr = now.toISOString().split('T')[0];
-                // 调整种子记录日期到最近7天
-                const adjustedRecords = tmpl.seedRecords.map((r, ri) => {
-                    const d = new Date(now);
-                    d.setDate(d.getDate() - (tmpl.seedRecords.length - 1 - ri));
-                    return { ...r, date: d.toISOString().split('T')[0] };
-                });
-                this.users[uid] = {
-                    id: uid,
-                    name: tmpl.name,
-                    className: tmpl.className,
-                    studentId: tmpl.studentId,
-                    joinDate: tmpl.joinDate,
-                    avatar: tmpl.avatar || '',
-                    records: adjustedRecords,
-                    nextRecordId: adjustedRecords.length + 1,
-                    notificationCount: adjustedRecords.length > 0 ? Math.min(adjustedRecords.length, 5) : 0,
-                    createdAt: new Date().toISOString(),
-                    // 时间系统字段
-                    registerDate: tmpl.joinDate,
-                    lastLoginDate: todayStr,
-                    continuousDays: adjustedRecords.length > 0 ? Math.min(adjustedRecords.length, 7) : 1,
-                    // XP系统字段
-                    level: 1,
-                    xp: 0,
-                    totalXp: 0,
-                    // 图鉴系统字段
-                    collection: this._buildCollectionFromRecords(adjustedRecords),
-                };
-            });
-            this.saveUsers();
+            // 不自动生成用户，确保空 users 不会导致 resolveCurrentUser 创建默认用户
         }
     },
 
@@ -325,21 +294,18 @@ const App = {
     },
 
     resolveCurrentUser() {
-        // 从 localStorage 读取上次活跃用户
+        // Phase 4.4.3.3：不再自动创建默认用户或自动选择第一个用户
+        // 无正式认证时 currentUserId 保持 null
+        // 仅在有有效 users 数据且 lastUserId 匹配时恢复
         const lastUserId = localStorage.getItem('baobei_lastUser');
         if (lastUserId && this.users[lastUserId]) {
             this.currentUserId = lastUserId;
+            localStorage.setItem('baobei_lastUser', this.currentUserId);
         } else {
-            // 默认使用第一个用户
-            const ids = Object.keys(this.users);
-            if (ids.length > 0) {
-                this.currentUserId = ids[0];
-            } else {
-                // 创建默认用户
-                this.currentUserId = this.createNewUser('新同学', '未知班级', '');
-            }
+            // 无有效 lastUserId → currentUserId 为 null
+            // 不自动创建默认用户，不自动选第一个用户
+            this.currentUserId = null;
         }
-        localStorage.setItem('baobei_lastUser', this.currentUserId);
     },
 
     getCurrentUser() {
@@ -1462,6 +1428,11 @@ const App = {
     },
 
     switchUser(userId) {
+        // Phase 4.4.3.3：正式登录状态下禁止本地切换账号
+        if (this.isAuthenticated) {
+            console.warn('[auth] 正式登录状态下禁止本地切换账号，请使用退出登录→登录页');
+            return false;
+        }
         if (!this.users[userId]) return false;
         // 先保存当前用户数据
         this.saveCurrentUserData();
@@ -1479,6 +1450,12 @@ const App = {
     },
 
     createNewUser(name, className, avatar) {
+        // Phase 4.4.3.3：正式登录状态下禁止本地创建账号
+        // 正式注册必须使用 App.registerAccount()
+        if (this.isAuthenticated) {
+            console.warn('[auth] 正式登录状态下禁止本地创建账号，请使用注册页面');
+            return null;
+        }
         const uid = 'user_' + Date.now();
         const todayStr = new Date().toISOString().split('T')[0];
         const user = {
@@ -1574,6 +1551,11 @@ const App = {
     },
 
     deleteUser(userId) {
+        // Phase 4.4.3.3：正式登录状态下禁止删除本地账号
+        if (this.isAuthenticated) {
+            console.warn('[auth] 正式登录状态下禁止删除本地账号');
+            return false;
+        }
         if (!this.users[userId]) return false;
         if (Object.keys(this.users).length <= 1) {
             App.showToast('至少保留一个用户哦');
@@ -2061,11 +2043,10 @@ const App = {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.closeAddDrinkModal();
-                this.closeUserModal();
             }
         });
 
-        // 用户弹窗事件绑定
+        // 旧用户弹窗事件绑定（内部已是空实现，保留调用以避免报错）
         this.bindUserModal();
     },
 
@@ -2239,154 +2220,40 @@ const App = {
 
     // ===== 用户切换弹窗 =====
     bindUserModal() {
-        const userModal = document.getElementById('userSwitchModal');
-        if (!userModal) return;
-
-        document.getElementById('closeUserModal').addEventListener('click', () => this.closeUserModal());
-        userModal.addEventListener('click', (e) => {
-            if (e.target === userModal) this.closeUserModal();
-        });
-
-        document.getElementById('createUserBtn').addEventListener('click', () => this.handleCreateUser());
+        // 旧用户切换弹窗（userSwitchModal）已于 Phase 4.4.3.3 从 index.html 中移除
+        // 此方法保留空实现以避免调用方报错，正式账号切换应使用 logout() → 登录页
     },
 
+    // ===== 旧用户切换弹窗方法（Phase 4.4.3.3：已废弃，DOM 已移除） =====
+    // 以下方法保留空实现以避免调用方报错
+    // 正式账号切换应使用 logout() → 登录页
+
     openUserModal() {
-        const modal = document.getElementById('userSwitchModal');
-        if (!modal) return;
-        modal.classList.add('active');
-        document.body.style.overflow = 'hidden';
-        this.renderUserList();
+        // 已废弃：userSwitchModal DOM 已从 index.html 移除
+        // 正式登录状态下禁止本地切换账号
+        if (this.isAuthenticated) {
+            console.warn('[auth] 正式登录状态下禁止本地切换账号');
+            return false;
+        }
+        console.warn('[deprecated] openUserModal 已废弃，请使用退出登录→登录页切换账号');
     },
 
     closeUserModal() {
-        const modal = document.getElementById('userSwitchModal');
-        if (!modal) return;
-        modal.classList.remove('active');
-        document.body.style.overflow = '';
+        // 已废弃：userSwitchModal DOM 已从 index.html 移除
     },
 
     renderUserList() {
-        const listEl = document.getElementById('userList');
-        if (!listEl) return;
-        const allUsers = this.getAllUsers();
-        const currentUser = this.getCurrentUser();
-
-        listEl.innerHTML = allUsers.map(u => {
-            const stats = u.records ? u.records.length : 0;
-            const isCurrent = currentUser && u.id === currentUser.id;
-            const initials = u.name.charAt(0);
-            const avatarColor = this.getAvatarColor(u.name);
-            return `
-                <div class="user-list-item ${isCurrent ? 'current' : ''}" data-user-id="${u.id}">
-                    <div class="user-list-avatar" style="background: ${avatarColor};">
-                        ${u.avatar ? `<img src="${u.avatar}" alt="${u.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">` : ''}
-                        <span class="user-list-initials" style="${u.avatar ? '' : 'display:flex;'}">${initials}</span>
-                    </div>
-                    <div class="user-list-info">
-                        <span class="user-list-name">${u.name} ${isCurrent ? '<span class="user-current-tag">当前</span>' : ''}</span>
-                        <span class="user-list-meta">${u.className} · ${stats}条记录</span>
-                    </div>
-                    <div class="user-list-actions">
-                        ${!isCurrent ? `<button class="user-switch-btn" data-user-id="${u.id}">切换</button>` : ''}
-                        ${allUsers.length > 1 ? `<button class="user-delete-btn" data-user-id="${u.id}" title="删除用户"><i class="fas fa-trash"></i></button>` : ''}
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        // 绑定切换事件
-        listEl.querySelectorAll('.user-switch-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const uid = btn.dataset.userId;
-                if (this.switchUser(uid)) {
-                    this.showToast('已切换用户 ✨');
-                    this.renderUserList();
-                    this.updateHeaderAvatar();
-                    this.navigateTo(this.currentPage);
-                }
-            });
-        });
-
-        // 绑定删除事件
-        listEl.querySelectorAll('.user-delete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const uid = btn.dataset.userId;
-                if (confirm('确定要删除此用户吗？此操作不可撤销。')) {
-                    if (this.deleteUser(uid)) {
-                        this.showToast('用户已删除');
-                        this.renderUserList();
-                        this.updateHeaderAvatar();
-                        this.navigateTo(this.currentPage);
-                    }
-                }
-            });
-        });
-
-        // 点击整行也可切换
-        listEl.querySelectorAll('.user-list-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const uid = item.dataset.userId;
-                if (uid !== this.currentUserId) {
-                    if (this.switchUser(uid)) {
-                        this.showToast('已切换用户 ✨');
-                        this.renderUserList();
-                        this.updateHeaderAvatar();
-                        this.navigateTo(this.currentPage);
-                    }
-                }
-            });
-        });
+        // 已废弃：userList DOM 已从 index.html 移除
     },
 
     handleCreateUser() {
-        const nameInput = document.getElementById('newUserName');
-        const classInput = document.getElementById('newUserClass');
-        const name = nameInput.value.trim();
-        const className = classInput ? classInput.value.trim() : '';
-
-        if (!name) {
-            this.showToast('请输入姓名');
-            return;
+        // 已废弃：创建新用户表单 DOM 已从 index.html 移除
+        // 正式注册必须使用 App.registerAccount()
+        if (this.isAuthenticated) {
+            console.warn('[auth] 正式登录状态下禁止本地创建账号');
+            return false;
         }
-
-        // 1. 先保存当前用户数据（如果存在）
-        if (this.currentUserId && this.users[this.currentUserId]) {
-            this.saveCurrentUserData();
-        }
-
-        // 2. 创建新用户
-        const uid = this.createNewUser(name, className || '未知班级', '');
-
-        // 3. 切换当前用户ID并更新localStorage
-        this.currentUserId = uid;
-        localStorage.setItem('baobei_lastUser', uid);
-
-        // 4. 加载新用户的空数据
-        this.records = [];
-        this.nextRecordId = 1;
-        this.notificationCount = 0;
-        this.posts = JSON.parse(JSON.stringify(seedPosts));
-
-        // 5. 更新UI
-        this.updateHeaderAvatar();
-        this.updateNotificationBadge();
-
-        nameInput.value = '';
-        if (classInput) classInput.value = '';
-        this.closeUserModal();
-        this.showToast('新同学加入成功！🎉');
-
-        // 6. 导航到首页，显示新手引导
-        this.currentPage = 'dashboard';
-        const mainContent = document.getElementById('mainContent');
-        Dashboard.render(mainContent);
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.classList.toggle('active', item.dataset.page === 'dashboard');
-        });
-        mainContent.scrollTop = 0;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        console.warn('[deprecated] handleCreateUser 已废弃，请使用注册页面');
     },
 
     getAvatarColor(name) {

@@ -34,7 +34,8 @@ const categoryMap = {
     other: { label: '其他', icon: 'fa-ellipsis', color: '#8B7355' },
 };
 
-// 预设用户模板（用于创建新用户时的种子数据）
+// 预设用户模板（Phase 4.4.3.3：已废弃，仅用于旧数据兼容，不可作为正式登录用户）
+// loadUsers() 不再自动使用 userTemplates 生成演示账号
 const userTemplates = [
     {
         name: '雷霆小子',

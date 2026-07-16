@@ -46,20 +46,6 @@ const Profile = {
                 </div>
             </div>
 
-            <!-- 切换用户按钮 -->
-            <button class="card btn-user-switch mb-lg" id="switchUserBtn">
-                <div class="user-switch-content">
-                    <div class="user-switch-left">
-                        <i class="fas fa-exchange-alt"></i>
-                        <span>切换用户</span>
-                    </div>
-                    <div class="user-switch-right">
-                        <span class="user-switch-hint">当前：${profile.name}</span>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
-                </div>
-            </button>
-
             <!-- 我的AI饮品人格 -->
             <div class="card personality-card mb-lg">
                 <div class="card-header">
@@ -212,7 +198,7 @@ const Profile = {
                                 </div>
                                 <div class="security-action-text">
                                     <span class="security-action-label">退出登录</span>
-                                    <span class="security-action-desc">退出当前认证账号</span>
+                                    <span class="security-action-desc">退出当前账号，或登录其他账号</span>
                                 </div>
                             </div>
                             <i class="fas fa-chevron-right"></i>
@@ -226,13 +212,6 @@ const Profile = {
     },
 
     bindEvents() {
-        const switchBtn = document.getElementById('switchUserBtn');
-        if (switchBtn) {
-            switchBtn.addEventListener('click', () => {
-                App.openUserModal();
-            });
-        }
-
         // 修改密码按钮
         const changePwdBtn = document.getElementById('changePasswordBtn');
         if (changePwdBtn) {
@@ -453,7 +432,7 @@ const Profile = {
     // ===== 退出登录 =====
 
     _handleLogout() {
-        if (!confirm('确定要退出当前账号吗？')) return;
+        if (!confirm('确定要退出当前账号吗？\n退出后可登录其他账号。')) return;
 
         // 保存当前数据
         App.saveCurrentUserData();
@@ -664,15 +643,6 @@ const Profile = {
             .lock-icon { position: absolute; bottom: -2px; right: -6px; font-size: 12px; color: var(--color-text-light); background: var(--color-cream); border-radius: 50%; padding: 3px; }
             .achievement-name { display: block; font-size: var(--font-size-sm); font-weight: 600; margin-bottom: 2px; }
             .achievement-desc { display: block; font-size: 11px; color: var(--color-text-light); }
-
-            /* 切换用户按钮 */
-            .btn-user-switch { padding: var(--spacing-md) var(--spacing-lg); cursor: pointer; transition: all 0.2s; border: 2px dashed var(--color-border); background: var(--color-cream); width: 100%; display: block; min-height: 48px; -webkit-tap-highlight-color: transparent; }
-            .btn-user-switch:hover { border-color: var(--color-primary); background: var(--color-white); }
-            .btn-user-switch:active { border-color: var(--color-primary); background: var(--color-white); transform: scale(0.98); }
-            .user-switch-content { display: flex; justify-content: space-between; align-items: center; }
-            .user-switch-left { display: flex; align-items: center; gap: var(--spacing-sm); color: var(--color-primary); font-weight: 600; font-size: var(--font-size-md); }
-            .user-switch-right { display: flex; align-items: center; gap: var(--spacing-sm); color: var(--color-text-light); font-size: var(--font-size-sm); }
-            .user-switch-hint { color: var(--color-text-secondary); }
 
             /* 饮品人格 */
             .personality-card { }
