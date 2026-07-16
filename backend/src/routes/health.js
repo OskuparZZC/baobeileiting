@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const config = require('../config');
 const { success } = require('../utils/response');
 
 router.get('/', (req, res) => {
@@ -13,7 +14,8 @@ router.get('/', (req, res) => {
     version: '2.1.0',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV || 'development'
+    env: process.env.NODE_ENV || 'development',
+    authEnabled: config.authEnabled,
   }, '服务运行正常');
 });
 

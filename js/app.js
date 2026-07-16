@@ -23,6 +23,8 @@ const App = {
     authLoading: false,
     authError: null,
     _backendSyncDone: false,  // 防止重复调用 _initBackendSync()
+    _uiBound: false,          // 防止重复绑定全局事件
+    _authenticatedStartupDone: false,  // 防止重复执行启动
 
     // 兼容旧代码：动态获取当前用户信息
     get userProfile() {
@@ -52,43 +54,40 @@ const App = {
     },
 
     async init() {
-        // 1. 加载用户系统
+        // 1. 加载用户系统（保留旧数据兼容）
         this.loadUsers();
-        // 2. 读取 token 并尝试恢复认证会话
+
+        // 2. 显示认证加载页面
+        this._showAuthLoading();
+
+        // 3. 检测后端认证模式
+        await api.auth.detectAuthMode();
+
+        // 4. 读取 token 并尝试恢复认证会话
         this.authToken = api.auth.getToken();
         let authRestored = false;
         if (this.authToken) {
             authRestored = await this.restoreAuthSession();
         }
-        // 3. 如果没有 token 或恢复失败，走旧本地用户流程
-        if (!authRestored) {
-            this.resolveCurrentUser();
-            this.loadCurrentUserData();
-            // 确保后端用户绑定，然后同步统计、记录、图鉴（顺序执行，不阻塞 UI）
-            if (!this._backendSyncDone) {
-                this._initBackendSync().catch(err => console.warn('[init] 后端同步异常:', err.message));
-            }
+
+        // 5. 有 token 且恢复成功 → 进入应用
+        if (authRestored) {
+            this._hideAuthLoading();
+            await this.completeAuthenticatedStartup();
+            return;
         }
-        // 4. 同步通知徽标（必须在 loadCurrentUserData 之后）
-        this.updateNotificationBadge();
-        // 5. 初始化每日任务系统（必须在 checkLoginStreak 之前，否则登录任务无法被标记）
-        this.initDailyTasks();
-        // 6. 检查并更新登录打卡
-        this.checkLoginStreak();
 
-        // 7. 初始化UI
-        this.bindNavigation();
-        this.bindFAB();
-        this.bindModal();
-        this.bindToast();
-        this.bindNotificationBtn();
-        this.bindProfileBtn();
-        this.navigateTo('dashboard');
-        this.updateHeaderAvatar();
+        // 6. 有 token 但恢复失败（网络错误）→ 保留 token，显示登录页
+        if (this.authToken && !authRestored) {
+            this._hideAuthLoading();
+            const msg = this._lastRestoreError || '暂时无法连接服务器，请稍后重试';
+            this.showLoginPage(msg);
+            return;
+        }
 
-        // 异步加载后端饮品数据（不阻塞 UI）
-        this.loadDrinks();
-        this.loadBrands();
+        // 7. 无 token → 显示登录页
+        this._hideAuthLoading();
+        this.showLoginPage();
     },
 
     // ===== 饮品数据加载 =====
@@ -770,7 +769,18 @@ const App = {
         // 4. 持久化
         this.saveUsers();
 
-        // 5. 加载当前用户数据
+        // 5. 保存最小会话信息（用于开发模式刷新恢复）
+        //    不保存密码，不保存 passwordHash
+        this._saveAuthUser({
+            id: backendUser.id,
+            name: backendUser.name,
+            className: backendUser.className || '',
+            studentId: backendUser.studentId || '',
+            avatar: backendUser.avatar || '',
+            _backendId: backendUser.id,
+        });
+
+        // 6. 加载当前用户数据
         this.loadCurrentUserData();
 
         console.log(`[auth] 认证会话已设置: ${backendUser.name} (${backendUser.id}) → ${targetId}`);
@@ -785,6 +795,9 @@ const App = {
         this.isAuthenticated = false;
         this.authError = null;
 
+        // 清除本地保存的 auth 用户信息
+        this._clearSavedAuthUser();
+
         // 清空当前会话缓存
         this.records = [];
         this.leaderboardData = null;
@@ -796,16 +809,13 @@ const App = {
             this.saveUsers();
         }
 
-        // 切换到旧本地用户流程
-        const ids = Object.keys(this.users);
-        if (ids.length > 0) {
-            this.currentUserId = ids[0];
-            localStorage.setItem('baobei_lastUser', ids[0]);
-            this.loadCurrentUserData();
-        } else {
-            this.currentUserId = null;
-            localStorage.removeItem('baobei_lastUser');
-        }
+        // 重置当前用户
+        this.currentUserId = null;
+        localStorage.removeItem('baobei_lastUser');
+
+        // 重置同步标记
+        this._backendSyncDone = false;
+        this._authenticatedStartupDone = false;
 
         console.log('[auth] 认证会话已清除');
     },
@@ -818,38 +828,300 @@ const App = {
         const token = api.auth.getToken();
         if (!token) return false;
 
+        const backendAuthEnabled = api.auth.backendAuthEnabled;
+        this._lastRestoreError = null;
+
         this.authLoading = true;
         try {
-            const res = await api.users.me();
-            if (res.data && res.data.user) {
-                this.setAuthSession(token, res.data.user);
-                this.authLoading = false;
-                // 执行后端同步
-                try {
-                    await this._initBackendSync();
-                } catch (err) {
-                    console.warn('[auth] 恢复后同步异常:', err.message);
+            // 正式模式：使用 Bearer token 调用 /users/me
+            // 开发模式：需要从本地存储中获取 _backendId，用 x-user-id 验证
+            if (backendAuthEnabled === true) {
+                // 正式 JWT 模式
+                const res = await api.users.me();
+                if (res.data && res.data.user) {
+                    this.setAuthSession(token, res.data.user);
+                    this.authLoading = false;
+                    // 执行后端同步
+                    try {
+                        await this._initBackendSync();
+                    } catch (err) {
+                        console.warn('[auth] 恢复后同步异常:', err.message);
+                    }
+                    console.log('[auth] 认证会话已恢复（JWT模式）');
+                    return true;
                 }
-                console.log('[auth] 认证会话已恢复');
-                return true;
+                console.warn('[auth] /me 返回数据异常，清除 token');
+                this.clearAuthSession();
+                this.authLoading = false;
+                return false;
+            } else {
+                // 开发模式：使用本地保存的 auth 用户信息 + x-user-id 验证
+                const savedAuthUser = this._getSavedAuthUser();
+                if (!savedAuthUser || !savedAuthUser._backendId) {
+                    // 有 token 但没有本地 auth 用户信息 → 无法在开发模式恢复
+                    console.warn('[auth] 开发模式下无本地 auth 用户信息，无法恢复');
+                    this.authLoading = false;
+                    // 不清除 token，可能是从正式模式切换回开发模式
+                    this._lastRestoreError = '请重新登录以恢复会话';
+                    return false;
+                }
+
+                // 开发模式：用 x-user-id 调用 /users/me 验证用户存在
+                try {
+                    const res = await api.get('/users/me', { xUserId: savedAuthUser._backendId });
+                    if (res.data && res.data.user) {
+                        this.setAuthSession(token, res.data.user);
+                        this.authLoading = false;
+                        // 执行后端同步
+                        try {
+                            await this._initBackendSync();
+                        } catch (err) {
+                            console.warn('[auth] 恢复后同步异常:', err.message);
+                        }
+                        console.log('[auth] 认证会话已恢复（开发模式）');
+                        return true;
+                    }
+                } catch (devErr) {
+                    console.warn('[auth] 开发模式用户验证失败:', devErr.message);
+                }
+
+                // 验证失败
+                console.warn('[auth] 开发模式恢复失败，清除认证会话');
+                this.clearAuthSession();
+                this.authLoading = false;
+                this._lastRestoreError = '登录已过期，请重新登录';
+                return false;
             }
-            // 响应异常，清除 token
-            console.warn('[auth] /me 返回数据异常，清除 token');
-            this.clearAuthSession();
-            this.authLoading = false;
-            return false;
         } catch (err) {
             this.authLoading = false;
             if (err.code === 401 || err.status === 401) {
                 // 401：token 无效，清除
                 console.warn('[auth] token 已失效，清除认证会话');
                 this.clearAuthSession();
+                this._lastRestoreError = '登录已过期，请重新登录';
                 return false;
             }
             // 网络错误：保留 token，保留本地缓存
             console.warn('[auth] 恢复认证会话网络错误，保留 token:', err.message);
+            this._lastRestoreError = '暂时无法连接服务器，请稍后重试';
             return false;
         }
+    },
+
+    // ===== 认证会话辅助存储（baobei_auth_user） =====
+
+    _AUTH_USER_KEY: 'baobei_auth_user',
+
+    /**
+     * 保存最小认证用户信息（开发模式刷新恢复用）
+     * 不保存密码、passwordHash、token
+     */
+    _saveAuthUser(authUser) {
+        try {
+            const data = {
+                id: authUser.id,
+                name: authUser.name,
+                className: authUser.className || '',
+                studentId: authUser.studentId || '',
+                avatar: authUser.avatar || '',
+                _backendId: authUser._backendId || authUser.id,
+                savedAt: new Date().toISOString(),
+            };
+            localStorage.setItem(this._AUTH_USER_KEY, JSON.stringify(data));
+        } catch (e) {
+            console.warn('[auth] 保存 auth 用户信息失败:', e.message);
+        }
+    },
+
+    /**
+     * 获取保存的认证用户信息
+     * @returns {Object|null}
+     */
+    _getSavedAuthUser() {
+        try {
+            const raw = localStorage.getItem(this._AUTH_USER_KEY);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            if (!data || !data._backendId) return null;
+            return data;
+        } catch (e) {
+            console.warn('[auth] 读取 auth 用户信息失败:', e.message);
+            return null;
+        }
+    },
+
+    /**
+     * 清除保存的认证用户信息
+     */
+    _clearSavedAuthUser() {
+        try {
+            localStorage.removeItem(this._AUTH_USER_KEY);
+        } catch (e) {
+            console.warn('[auth] 清除 auth 用户信息失败:', e.message);
+        }
+    },
+
+    // ===== 认证页面控制 =====
+
+    /**
+     * 显示登录页
+     * @param {string} message - 可选的提示消息
+     */
+    showLoginPage(message = '') {
+        this.currentPage = 'login';
+
+        // 隐藏 header、bottom-nav、FAB
+        this._setAuthUIVisible(false);
+
+        // 渲染登录页
+        const mainContent = document.getElementById('mainContent');
+        if (mainContent) {
+            LoginPage.mode = 'login';
+            LoginPage.error = '';
+            LoginPage.render(mainContent, message);
+        }
+    },
+
+    /**
+     * 隐藏登录页
+     */
+    hideLoginPage() {
+        // 恢复 header、bottom-nav、FAB
+        this._setAuthUIVisible(true);
+    },
+
+    /**
+     * 控制认证相关 UI 可见性
+     * @param {boolean} visible - true 显示，false 隐藏
+     */
+    _setAuthUIVisible(visible) {
+        const header = document.querySelector('.app-header');
+        const nav = document.querySelector('.bottom-nav');
+        const fab = document.querySelector('.fab');
+
+        if (header) header.style.display = visible ? '' : 'none';
+        if (nav) nav.style.display = visible ? '' : 'none';
+        if (fab) fab.style.display = visible ? '' : 'none';
+    },
+
+    /**
+     * 显示认证加载画面
+     */
+    _showAuthLoading() {
+        const header = document.querySelector('.app-header');
+        const nav = document.querySelector('.bottom-nav');
+        const fab = document.querySelector('.fab');
+
+        if (header) header.style.display = 'none';
+        if (nav) nav.style.display = 'none';
+        if (fab) fab.style.display = 'none';
+
+        const mainContent = document.getElementById('mainContent');
+        if (mainContent) {
+            mainContent.innerHTML = `
+                <div class="auth-loading">
+                    <div class="auth-mascot-wrap">
+                        <img src="assets/mascot.png" alt="看板娘" class="auth-mascot">
+                    </div>
+                    <div class="loading-spinner"></div>
+                    <p class="auth-loading-text">正在验证登录状态...</p>
+                </div>
+            `;
+        }
+    },
+
+    /**
+     * 隐藏认证加载画面
+     */
+    _hideAuthLoading() {
+        // 清空 mainContent 中的 loading 内容
+        const mainContent = document.getElementById('mainContent');
+        if (mainContent) {
+            mainContent.innerHTML = '';
+        }
+    },
+
+    /**
+     * 统一认证启动方法
+     * 职责：
+     * 1. 确认当前用户已通过 setAuthSession 建立
+     * 2. loadCurrentUserData()
+     * 3. 执行一次 _initBackendSync()
+     * 4. 绑定导航
+     * 5. 绑定 FAB
+     * 6. 绑定其他全局事件
+     * 7. 显示 app-header 和 bottom-nav
+     * 8. navigateTo('dashboard')
+     *
+     * 必须防止重复绑定
+     */
+    async completeAuthenticatedStartup() {
+        // 防止重复执行
+        if (this._authenticatedStartupDone) {
+            console.log('[startup] 已执行过认证启动，跳过重复调用');
+            // 至少刷新页面显示
+            this.hideLoginPage();
+            this.updateHeaderAvatar();
+            this.updateNotificationBadge();
+            this.navigateTo('dashboard');
+            return;
+        }
+        this._authenticatedStartupDone = true;
+
+        // 1. 确认用户已设置
+        const user = this.getCurrentUser();
+        if (!user) {
+            console.error('[startup] completeAuthenticatedStartup 调用时无当前用户');
+            this.showLoginPage('会话异常，请重新登录');
+            return;
+        }
+
+        // 2. 加载当前用户数据（已在 setAuthSession 中调用，但确保数据一致）
+        this.loadCurrentUserData();
+
+        // 3. 执行后端同步
+        if (!this._backendSyncDone) {
+            try {
+                await this._initBackendSync();
+            } catch (err) {
+                console.warn('[startup] 后端同步异常:', err.message);
+            }
+        }
+
+        // 4. 显示 UI 元素
+        this.hideLoginPage();
+
+        // 5. 绑定全局事件（仅首次）
+        if (!this._uiBound) {
+            this.bindNavigation();
+            this.bindFAB();
+            this.bindModal();
+            this.bindToast();
+            this.bindNotificationBtn();
+            this.bindProfileBtn();
+            this._uiBound = true;
+        }
+
+        // 6. 更新头部头像
+        this.updateHeaderAvatar();
+
+        // 7. 同步通知徽标
+        this.updateNotificationBadge();
+
+        // 8. 初始化每日任务系统
+        this.initDailyTasks();
+
+        // 9. 检查并更新登录打卡
+        this.checkLoginStreak();
+
+        // 10. 导航到首页
+        this.navigateTo('dashboard');
+
+        // 11. 异步加载饮品数据
+        this.loadDrinks();
+        this.loadBrands();
+
+        console.log('[startup] 认证启动完成');
     },
 
     /**
@@ -873,6 +1145,7 @@ const App = {
             throw err;
         }
 
+        this.authLoading = true;
         try {
             const res = await api.users.login({ studentId: trimmedId, password });
             if (!res.data || !res.data.token || !res.data.user) {
@@ -892,6 +1165,8 @@ const App = {
         } catch (err) {
             this.authError = err.message;
             throw err;
+        } finally {
+            this.authLoading = false;
         }
     },
 
@@ -901,6 +1176,7 @@ const App = {
      * @returns {Promise<Object>} { success, user }
      */
     async registerAccount(payload) {
+        this.authLoading = true;
         try {
             const res = await api.users.register(payload);
             if (!res.data || !res.data.token || !res.data.user) {
@@ -920,6 +1196,8 @@ const App = {
         } catch (err) {
             this.authError = err.message;
             throw err;
+        } finally {
+            this.authLoading = false;
         }
     },
 
@@ -931,10 +1209,8 @@ const App = {
         this.saveCurrentUserData();
         // 清除认证会话
         this.clearAuthSession();
-        // 刷新页面显示
-        this.updateHeaderAvatar();
-        this.updateNotificationBadge();
-        this.navigateTo('dashboard');
+        // 显示登录页（不进入演示账号首页）
+        this.showLoginPage();
         console.log('[auth] 已退出登录');
     },
 

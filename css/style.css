@@ -957,3 +957,237 @@ a {
     color: var(--color-text);
     margin-bottom: var(--spacing-md);
 }
+
+/* ===== 认证页面（登录/注册） ===== */
+.auth-page {
+    min-height: calc(100vh - var(--header-height));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: var(--spacing-xl) var(--spacing-lg);
+    padding-bottom: calc(var(--bottom-nav-height) + var(--spacing-xxl));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.auth-shell {
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+}
+
+/* 品牌区域 */
+.auth-brand {
+    text-align: center;
+    margin-bottom: var(--spacing-xxl);
+    padding-top: var(--spacing-xl);
+}
+
+.auth-mascot-wrap {
+    width: 88px;
+    height: 88px;
+    margin: 0 auto var(--spacing-lg);
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(107, 66, 38, 0.08), rgba(139, 94, 60, 0.12));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-mascot {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    animation: mascot-bounce 2.5s ease-in-out infinite;
+}
+
+.auth-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--color-primary);
+    letter-spacing: 2px;
+    margin-bottom: var(--spacing-sm);
+}
+
+.auth-subtitle {
+    font-size: var(--font-size-md);
+    color: var(--color-text-secondary);
+    font-weight: 400;
+    letter-spacing: 0.5px;
+}
+
+/* 认证卡片 */
+.auth-card {
+    background: var(--color-white);
+    border-radius: var(--card-radius);
+    padding: var(--spacing-xxl) var(--spacing-xl);
+    box-shadow: var(--card-shadow);
+    border: 1px solid var(--color-border);
+}
+
+/* 认证表单 */
+.auth-form .form-group {
+    margin-bottom: var(--spacing-lg);
+}
+
+.auth-form .form-group:last-of-type {
+    margin-bottom: var(--spacing-xl);
+}
+
+/* 必填标记 */
+.auth-required {
+    color: var(--color-danger);
+    font-weight: 400;
+}
+
+/* 密码输入框容器 */
+.auth-password-wrap {
+    position: relative;
+}
+
+.auth-password-wrap .form-input {
+    padding-right: 48px;
+}
+
+.auth-password-toggle {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-lg);
+    transition: color 0.2s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.auth-password-toggle:active {
+    color: var(--color-primary);
+}
+
+/* 提交按钮 */
+.auth-submit {
+    min-height: 48px;
+    font-size: var(--font-size-lg);
+    border-radius: 12px;
+    position: relative;
+}
+
+.auth-submit:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.auth-submit-spinner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* 切换入口 */
+.auth-switch {
+    text-align: center;
+    margin-top: var(--spacing-xl);
+    font-size: var(--font-size-md);
+    color: var(--color-text-secondary);
+}
+
+.auth-switch a {
+    color: var(--color-primary);
+    font-weight: 600;
+    text-decoration: none;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.auth-switch a:active {
+    background: var(--color-accent-light);
+}
+
+/* 错误提示 */
+.auth-error {
+    background: #FDECEC;
+    color: var(--color-danger);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: 10px;
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-lg);
+    text-align: center;
+    font-weight: 500;
+}
+
+/* 信息提示（非错误） */
+.auth-info {
+    background: var(--color-accent-light);
+    color: var(--color-primary);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: 10px;
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-lg);
+    text-align: center;
+    font-weight: 500;
+}
+
+/* 认证加载页面（验证 token 期间） */
+.auth-loading {
+    min-height: calc(100vh - var(--header-height));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xxl);
+    text-align: center;
+}
+
+.auth-loading .auth-mascot-wrap {
+    margin-bottom: var(--spacing-xl);
+}
+
+.auth-loading-text {
+    font-size: var(--font-size-md);
+    color: var(--color-text-secondary);
+    margin-top: var(--spacing-lg);
+}
+
+/* 小屏适配 */
+@media (max-width: 374px) {
+    .auth-page {
+        padding: var(--spacing-lg) var(--spacing-md);
+        padding-bottom: calc(var(--bottom-nav-height) + var(--spacing-lg));
+    }
+
+    .auth-mascot-wrap {
+        width: 72px;
+        height: 72px;
+    }
+
+    .auth-mascot {
+        width: 58px;
+        height: 58px;
+    }
+
+    .auth-title {
+        font-size: 24px;
+    }
+
+    .auth-card {
+        padding: var(--spacing-xl) var(--spacing-lg);
+    }
+
+    .auth-submit {
+        min-height: 44px;
+        font-size: var(--font-size-md);
+    }
+}

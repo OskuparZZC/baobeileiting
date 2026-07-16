@@ -15,6 +15,56 @@ const API_BASE = (() => {
   return 'http://localhost:3000/api';
 })();
 
+/** 默认请求超时（毫秒） */
+const DEFAULT_TIMEOUT = 8000;
+/** 健康检查超时（毫秒） */
+const HEALTH_TIMEOUT = 4000;
+
+/**
+ * 创建一个可被 AbortController 取消的 fetch 请求
+ * @param {string} url
+ * @param {Object} options
+ * @param {number} timeout - 超时毫秒数
+ * @returns {Promise<Response>}
+ */
+async function fetchWithTimeout(url, options, timeout) {
+  const controller = new AbortController();
+  const signal = controller.signal;
+
+  const fetchOptions = { ...options, signal };
+
+  let timeoutId = null;
+  if (timeout && timeout > 0) {
+    timeoutId = setTimeout(() => controller.abort(), timeout);
+  }
+
+  try {
+    const res = await fetch(url, fetchOptions);
+    return res;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 包装网络错误为统一格式
+ * @param {Error} err - 原始错误
+ * @param {boolean} isTimeout - 是否为超时
+ * @returns {Error}
+ */
+function wrapNetworkError(err, isTimeout) {
+  const wrapped = new Error(
+    isTimeout
+      ? '请求超时，请检查网络或服务器'
+      : '无法连接服务器，请检查后端或网络'
+  );
+  wrapped.code = 0;
+  wrapped.status = 0;
+  wrapped.isNetworkError = true;
+  wrapped.isTimeout = !!isTimeout;
+  return wrapped;
+}
+
 const api = {
 
   // ==================== Token 管理 ====================
@@ -22,6 +72,14 @@ const api = {
   auth: {
     token: null,
     _storageKey: 'baobei_auth_token',
+
+    /**
+     * 后端认证模式（通过健康检查获取）
+     * - true：后端启用 JWT 认证，受保护接口只接受 Bearer token
+     * - false：开发测试模式，受保护接口接受 x-user-id
+     * - null：尚未检测
+     */
+    backendAuthEnabled: null,
 
     /**
      * 设置 token
@@ -65,38 +123,84 @@ const api = {
         console.warn('[auth] 清除 token 失败:', e.message);
       }
     },
+
+    /**
+     * 检测后端认证模式
+     * 调用 /api/health 获取 authEnabled 字段
+     * @returns {Promise<boolean>} 是否成功获取
+     */
+    async detectAuthMode() {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE}/health`, { method: 'GET' }, HEALTH_TIMEOUT);
+        if (!res.ok) throw new Error('Health check failed');
+        const json = await res.json();
+        if (json.data && typeof json.data.authEnabled === 'boolean') {
+          this.backendAuthEnabled = json.data.authEnabled;
+          console.log(`[auth] 后端认证模式: authEnabled=${this.backendAuthEnabled}`);
+          return true;
+        }
+        console.warn('[auth] 健康检查响应中无 authEnabled 字段，保持现有模式');
+        return false;
+      } catch (e) {
+        console.warn('[auth] 无法获取后端认证模式，保持现有 fallback:', e.message);
+        return false;
+      }
+    },
   },
 
   /**
    * 通用请求
    * @param {string} method  - GET | POST | DELETE | PUT
    * @param {string} path    - /drinks 等（不含 /api 前缀）
-   * @param {Object} options - { body?, xUserId? }
+   * @param {Object} options - { body?, xUserId?, authMode? }
+   *   authMode:
+   *     'auto'（默认）— 根据 backendAuthEnabled 自动决定认证头
+   *     'public'        — 不发送认证头（登录/注册等公开接口）
+   *     'token'         — 强制使用 Bearer token
+   *     'dev'           — 强制使用 x-user-id
    * @returns {Object} { code, message, data }
    */
   async request(method, path, options = {}) {
-    const { body, xUserId } = options;
+    const { body, xUserId, authMode, timeout } = options;
     const headers = { 'Content-Type': 'application/json' };
 
-    // Token 优先于 x-user-id，不同时发送
-    const token = this.auth.getToken();
-    if (token) {
-      headers['Authorization'] = 'Bearer ' + token;
-    } else if (xUserId) {
-      headers['x-user-id'] = String(xUserId);
+    // 公开接口：不发送任何认证头
+    if (authMode === 'public') {
+      // skip auth headers
+    } else {
+      const token = this.auth.getToken();
+      const backendAuthEnabled = this.auth.backendAuthEnabled;
+
+      // 规则：正式 JWT 模式下，有 token 则只发 token
+      // 开发模式下，即使有 token，受保护业务请求仍使用 x-user-id
+      if (backendAuthEnabled === true && token) {
+        // 正式模式 + 有 token → Bearer
+        headers['Authorization'] = 'Bearer ' + token;
+      } else if (backendAuthEnabled === false && xUserId) {
+        // 开发模式 → 使用 x-user-id（即使有 token，token 仅保存不用）
+        headers['x-user-id'] = String(xUserId);
+      } else if (token && !xUserId) {
+        // fallback：有 token 但未知后端模式 → 使用 token
+        headers['Authorization'] = 'Bearer ' + token;
+      } else if (xUserId) {
+        // fallback：无 token 有 xUserId → 使用 x-user-id
+        headers['x-user-id'] = String(xUserId);
+      }
+      // 都没有 → 不发送认证头，后端会返回 401
     }
 
     const fetchOptions = { method, headers };
     if (body) fetchOptions.body = JSON.stringify(body);
 
+    const effectiveTimeout = (timeout != null) ? timeout : DEFAULT_TIMEOUT;
+
     let res;
     try {
-      res = await fetch(`${API_BASE}${path}`, fetchOptions);
+      res = await fetchWithTimeout(`${API_BASE}${path}`, fetchOptions, effectiveTimeout);
     } catch (networkErr) {
-      const err = new Error(networkErr.message || '网络请求失败');
-      err.code = 0;
-      err.isNetworkError = true;
-      throw err;
+      // 判断是否为 AbortError（超时）
+      const isAbort = (networkErr.name === 'AbortError');
+      throw wrapNetworkError(networkErr, isAbort);
     }
 
     let json;
@@ -109,7 +213,7 @@ const api = {
       throw err;
     }
 
-    // 401 统一处理：清除 token
+    // 401 统一处理：清除 token（这是 HTTP 错误，不是网络错误）
     if (res.status === 401) {
       this.auth.clearToken();
       const err = new Error(json.message || '认证已失效，请重新登录');
@@ -119,6 +223,7 @@ const api = {
       throw err;
     }
 
+    // 其他 HTTP 错误（400/409/500 等），不是网络错误
     if (!res.ok || (json.code && json.code >= 400)) {
       const err = new Error(json.message || '请求失败');
       err.code = json.code || res.status;
@@ -155,22 +260,22 @@ const api = {
 
   users: {
     /**
-     * 注册新用户（自动绑定后端）
+     * 注册新用户（公开接口，无需认证）
      * @param {Object} data - { name, className, studentId, password }
      * @returns {Object} { code, message, data: { user, token } }
      * 注意：token 由 App 层处理，api 层不自动保存 token
      */
     register(data) {
-      return api.post('/users/register', data);
+      return api.post('/users/register', data, { authMode: 'public' });
     },
 
     /**
-     * 用户登录
+     * 用户登录（公开接口，无需认证）
      * @param {Object} data - { studentId, password }
      * @returns {Object} { code, message, data: { user, token } }
      */
     login(data) {
-      return api.post('/users/login', data);
+      return api.post('/users/login', data, { authMode: 'public' });
     },
 
     /**
@@ -284,6 +389,18 @@ const api = {
      */
     unlock(data, xUserId) {
       return api.post('/collections/unlock', data, { xUserId });
+    },
+  },
+
+  // ==================== 系统 ====================
+
+  system: {
+    /**
+     * 健康检查
+     * @returns {Object} { code, message, data: { status, version, authEnabled, ... } }
+     */
+    health() {
+      return api.get('/health');
     },
   },
 
