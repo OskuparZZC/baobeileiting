@@ -235,28 +235,41 @@ class UserModel extends BaseModel {
   }
 
   /**
-   * 更新用户 XP 和等级
+   * 更新用户 XP 和等级（操作 user_stats 表，非 users 表）
+   *
+   * 事件驱动模式：前端提交 sourceType + targetId，
+   * 后端负责根据事件配置计算 xpAmount 并调用本方法落库。
+   *
    * @param {string} userId
    * @param {number} xpAmount - 要增加的 XP
-   * @returns {{ xp, level, leveledUp, newTitle } | null}
+   * @returns {Promise<{ xp: number, totalXp: number, level: number, leveledUp: boolean, newTitle: string } | null>}
    */
-  addXP(userId, xpAmount) {
-    const user = this.findById(userId);
-    if (!user) return null;
+  async addXP(userId, xpAmount) {
+    const StatsModel = new UserStatsModel();
 
-    const oldLevel = user.level;
-    user.xp += xpAmount;
+    // 确保 user_stats 行存在（不存在则初始化）
+    let stats = await StatsModel.initForUser(userId);
+    if (!stats) return null;
 
-    const levelInfo = getXPLevelInfo(user.xp);
-    user.level = levelInfo.level;
-    user.updatedAt = new Date().toISOString();
+    const oldLevel = stats.level;
+    const newXp = stats.xp + xpAmount;
+    const newTotalXp = stats.totalXp + xpAmount;
+    const levelInfo = getXPLevelInfo(newTotalXp);
+    const newLevel = levelInfo.level;
+    const leveledUp = newLevel > oldLevel;
 
-    this.update(userId, user);
+    // 更新 user_stats 表（注意：STATS_ALLOWED_FIELDS 的 key 用 snake_case）
+    await StatsModel.updateByUserId(userId, {
+      xp: newXp,
+      total_xp: newTotalXp,
+      level: newLevel,
+    });
 
     return {
-      xp: user.xp,
-      level: user.level,
-      leveledUp: user.level > oldLevel,
+      xp: newXp,
+      totalXp: newTotalXp,
+      level: newLevel,
+      leveledUp,
       newTitle: levelInfo.title,
     };
   }

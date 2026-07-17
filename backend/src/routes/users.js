@@ -479,7 +479,7 @@ router.post('/me/checkin', authMiddleware, (req, res) => {
 router.post('/me/events',
   authMiddleware,
   validate.required(['sourceType']),
-  (req, res) => {
+  async (req, res) => {
     try {
       const { sourceType, targetId } = req.body;
 
@@ -508,12 +508,14 @@ router.post('/me/events',
         targetId: targetId || null,
       });
 
-      // 更新用户 XP
-      const xpResult = UserModel.addXP(req.user.id, eventConfig.xpAmount);
-      const levelInfo = getXPLevelInfo(xpResult.xp);
+      // 更新用户 XP（异步：操作 user_stats 表）
+      const xpResult = await UserModel.addXP(req.user.id, eventConfig.xpAmount);
+      // 用 totalXp 计算等级信息（等级阈值基于累计总经验）
+      const levelInfo = getXPLevelInfo(xpResult.totalXp);
 
       return success(res, {
         xp: xpResult.xp,
+        totalXp: xpResult.totalXp,
         level: xpResult.level,
         levelUp: xpResult.leveledUp,
         newLevelName: xpResult.leveledUp ? levelInfo.title : null,

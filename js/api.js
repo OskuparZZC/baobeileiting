@@ -320,6 +320,17 @@ const api = {
     migrateStats(payload, xUserId) {
       return api.post('/users/me/stats/migrate', payload, { xUserId });
     },
+
+    /**
+     * 增量同步 XP 事件到后端（事件驱动模式）
+     * @param {string} sourceType - XP 事件类型，如 'RECORD_DRINK'
+     * @param {string|null} targetId - 幂等键，传 null 跳过幂等检查
+     * @param {string} xUserId - 后端用户 ID (UUID)
+     * @returns {Object} { code, message, data: { xp, level, levelUp, newLevelName, xpGained } }
+     */
+    postEvent(sourceType, targetId, xUserId) {
+      return api.post('/users/me/events', { sourceType, targetId }, { xUserId });
+    },
   },
 
   // ==================== 记录 ====================

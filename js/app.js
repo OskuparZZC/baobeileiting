@@ -1345,7 +1345,7 @@ const App = {
 
         // 每日首次登录 +5 XP
         if (isFirstLoginToday) {
-            const result = this.addXP(5, '每日登录');
+            const result = this.addXP(5, '每日登录', 'DAILY_TASK_LOGIN', todayStr);
             if (result.leveledUp) {
                 this.showXPToast(`🎉 每日登录 +${result.xpGained}XP！升级到 Lv.${result.newLevel} ${result.newTitle}！`);
             } else {
@@ -1397,7 +1397,8 @@ const App = {
     },
 
     // 添加经验值，返回 { xpGained, leveledUp, newLevel, newTitle }
-    addXP(amount, reason) {
+    // sourceType / targetId：增量同步 XP 到后端（fire-and-forget，不阻塞 UI）
+    addXP(amount, reason, sourceType = null, targetId = null) {
         const user = this.getCurrentUser();
         if (!user) return { xpGained: 0, leveledUp: false };
 
@@ -1419,12 +1420,43 @@ const App = {
         }
 
         this.saveUsers();
+
+        // 增量同步 XP 到后端（fire-and-forget，不阻塞返回，失败不影响前端）
+        if (sourceType && this.isAuthenticated && user._backendId) {
+            this._syncXPToBackend(sourceType, targetId);
+        }
+
         return {
             xpGained: amount,
             leveledUp,
             newLevel: newInfo.level,
             newTitle: newInfo.title,
         };
+    },
+
+    /**
+     * 增量同步 XP 事件到后端（fire-and-forget，失败静默处理）
+     * @param {string} sourceType - XP 事件类型
+     * @param {string|null} targetId - 幂等键，防止重复提交
+     */
+    async _syncXPToBackend(sourceType, targetId) {
+        const user = this.getCurrentUser();
+        if (!user || !user._backendId) return;
+
+        try {
+            await api.users.postEvent(sourceType, targetId, user._backendId);
+            console.log(`[xp] 后端同步成功: ${sourceType}`);
+        } catch (err) {
+            if (err.code === 409) {
+                // 幂等冲突：该事件已处理过，正常忽略
+                console.log(`[xp] 事件已处理，跳过: ${sourceType}`);
+            } else if (err.isNetworkError) {
+                // 网络不通：保留本地 XP，下次启动时迁移兜底
+                console.warn(`[xp] 网络不通，XP 保留在本地: ${err.message}`);
+            } else {
+                console.warn(`[xp] 后端同步失败（保留本地数据）: ${err.message}`);
+            }
+        }
     },
 
     switchUser(userId) {
@@ -2178,16 +2210,16 @@ const App = {
         }
 
         // XP 奖励：记录饮品 +10，评分 +5
-        const xpResult = this.addXP(10, '记录饮品');
+        const xpResult = this.addXP(10, '记录饮品', 'RECORD_DRINK', String(newRecord.id));
         let xpMsg = `记录添加成功！⚡ +${xpResult.xpGained}XP`;
         if (rating > 0) {
-            const ratingResult = this.addXP(5, '饮品评分');
+            const ratingResult = this.addXP(5, '饮品评分', 'RATE_DRINK', String(newRecord.id));
             xpMsg += ` | 评分 +${ratingResult.xpGained}XP`;
         }
 
         // 新饮品发现：额外 +20 XP
         if (collectionResult && collectionResult.isNew) {
-            const discoveryResult = this.addXP(20, '新饮品发现');
+            const discoveryResult = this.addXP(20, '新饮品发现', 'DISCOVER_DRINK', String(drinkId));
             xpMsg += ` | 🔍新发现 +${discoveryResult.xpGained}XP`;
         }
 
@@ -2504,7 +2536,7 @@ const App = {
                 loginTask.completed = true;
                 this.saveUsers();
                 // 发放XP
-                const xpResult = this.addXP(loginTask.xpReward, '每日任务：登录App');
+                const xpResult = this.addXP(loginTask.xpReward, '每日任务：登录App', 'DAILY_TASK_LOGIN', todayStr);
                 const xpMsg = `✅ 每日任务完成：「登录App」+${loginTask.xpReward}XP`;
                 if (xpResult.leveledUp) {
                     this.showXPToast(`🎉 ${xpMsg} | 升级到 Lv.${xpResult.newLevel} ${xpResult.newTitle}！`, 3000);
@@ -2582,7 +2614,10 @@ const App = {
         this.saveUsers();
 
         // 自动发放XP奖励
-        const xpResult = this.addXP(task.xpReward, `每日任务：${task.name}`);
+        const taskSourceTypeMap = { record: 'DAILY_TASK_RECORD', discover: 'DAILY_TASK_DISCOVER', rate: 'DAILY_TASK_RATE' };
+        const sourceType = taskSourceTypeMap[taskId] || null;
+        const todayStr = this.getTodayStr();
+        const xpResult = this.addXP(task.xpReward, `每日任务：${task.name}`, sourceType, todayStr);
         const xpMsg = `✅ 每日任务完成：「${task.name}」+${task.xpReward}XP`;
 
         if (xpResult.leveledUp) {

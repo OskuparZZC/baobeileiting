@@ -568,7 +568,7 @@ const HelpModule = {
                     HelpData.completeBounty(bountyId);
 
                     // 完成互助：+20 XP（奖励给接受者，即当前用户）
-                    const xpResult = App.addXP(20, '完成互助');
+                    const xpResult = App.addXP(20, '完成互助', 'COMPLETE_BOUNTY', bountyId);
                     if (xpResult.leveledUp) {
                         App.showXPToast(`🎉 完成互助！+${xpResult.xpGained}XP | 升级到 Lv.${xpResult.newLevel} ${xpResult.newTitle}！`, 3000);
                     } else {
