@@ -10,9 +10,9 @@
  */
 
 const API_BASE = (() => {
-  // 开发模式：同源直接走相对路径；跨域走生产服务器
+  // 开发模式和生产环境统一走相对路径 /api
   if (window.location.port === '3000') return '/api';
-  return 'http://115.159.112.99:3000/api';
+  return '/api';
 })();
 
 /** 默认请求超时（毫秒） */
