@@ -8,6 +8,8 @@
     <meta name="apple-mobile-web-app-title" content="爆杯雷霆">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#6B4226">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
     <title>爆杯雷霆 - 校园饮品管理</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -226,5 +228,19 @@
     <script src="js/pages/leaderboard.js"></script>
     <script src="js/pages/community.js"></script>
     <script src="js/pages/help.js"></script>
+    <!-- PWA Service Worker 注册 -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('service-worker.js')
+            .then(function(reg) {
+              console.log('[PWA] Service Worker 注册成功，scope:', reg.scope);
+            })
+            .catch(function(err) {
+              console.warn('[PWA] Service Worker 注册失败（不影响网站使用）:', err.message);
+            });
+        });
+      }
+    </script>
 </body>
 </html>

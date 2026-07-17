@@ -1,0 +1,21 @@
+{
+  "name": "爆杯雷霆",
+  "short_name": "爆杯雷霆",
+  "description": "校园饮品记录与互助应用",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#fff8f0",
+  "theme_color": "#6B4226",
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
