@@ -15,3 +15,7 @@ ALTER TABLE records
 ALTER TABLE records
   ADD COLUMN custom_brand VARCHAR(100) NULL COMMENT '用户自定义品牌' AFTER drink_id,
   ADD COLUMN custom_name  VARCHAR(100) NULL COMMENT '用户自定义饮品' AFTER custom_brand;
+
+-- 3. bounties 新增 submitted_at 字段
+ALTER TABLE bounties
+  ADD COLUMN submitted_at DATETIME NULL COMMENT '提交完成时间' AFTER accepted_at;

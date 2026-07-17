@@ -410,6 +410,84 @@ const api = {
     },
   },
 
+  // ==================== 悬赏互助 ====================
+
+  bounties: {
+    /**
+     * 获取悬赏列表（公开接口）
+     * @param {Object} filters - { status?, category?, urgency? }
+     * @returns {Object} { code, message, data: [...] }
+     */
+    list(filters = {}) {
+      const params = new URLSearchParams();
+      if (filters.status) params.append('status', filters.status);
+      if (filters.category) params.append('category', filters.category);
+      if (filters.urgency) params.append('urgency', filters.urgency);
+      const qs = params.toString();
+      return api.get(`/bounties${qs ? '?' + qs : ''}`, { authMode: 'public' });
+    },
+
+    /**
+     * 获取悬赏详情（公开接口）
+     * @param {number|string} id - 悬赏 ID
+     * @returns {Object} { code, message, data }
+     */
+    getById(id) {
+      return api.get(`/bounties/${id}`, { authMode: 'public' });
+    },
+
+    /**
+     * 发布悬赏
+     * 注意：publisherId 由后端通过 token 获取，前端不要传 publisherId
+     * @param {Object} data - { title, description, category?, urgency?, location?, deadline?, reward? }
+     * @param {string} [xUserId] - 开发模式下的用户标识
+     * @returns {Object} { code, message, data }
+     */
+    create(data, xUserId) {
+      return api.post('/bounties', data, { xUserId });
+    },
+
+    /**
+     * 当前用户接单
+     * @param {number|string} id - 悬赏 ID
+     * @param {string} [xUserId] - 开发模式下的用户标识
+     * @returns {Object} { code, message, data }
+     */
+    accept(id, xUserId) {
+      return api.put(`/bounties/${id}/accept`, null, { xUserId });
+    },
+
+    /**
+     * 接单者提交完成申请（accepted → submitted）
+     * @param {number|string} id - 悬赏 ID
+     * @param {string} [xUserId] - 开发模式下的用户标识
+     * @returns {Object} { code, message, data }
+     */
+    submit(id, xUserId) {
+      return api.put(`/bounties/${id}/submit`, null, { xUserId });
+    },
+
+    /**
+     * 发布者确认完成悬赏
+     * @param {number|string} id - 悬赏 ID
+     * @param {string} [xUserId] - 开发模式下的用户标识
+     * @returns {Object} { code, message, data }
+     */
+    complete(id, xUserId) {
+      return api.put(`/bounties/${id}/complete`, null, { xUserId });
+    },
+
+    /**
+     * 发布者取消悬赏
+     * @param {number|string} id - 悬赏 ID
+     * @param {string} [xUserId] - 开发模式下的用户标识
+     * @returns {Object} { code, message, data }
+     */
+    cancel(id, xUserId) {
+      return api.put(`/bounties/${id}/cancel`, null, { xUserId });
+    },
+  },
+
   // ==================== 系统 ====================
 
   system: {

@@ -1915,16 +1915,13 @@ const App = {
         });
     },
 
-    navigateTo(page) {
+    async navigateTo(page) {
         this.currentPage = page;
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.toggle('active', item.dataset.page === page);
         });
 
         const mainContent = document.getElementById('mainContent');
-        mainContent.style.animation = 'none';
-        mainContent.offsetHeight;
-        mainContent.style.animation = 'fadeIn 0.3s ease';
 
         switch (page) {
             case 'dashboard': Dashboard.render(mainContent); break;
@@ -1940,9 +1937,13 @@ const App = {
             case 'leaderboard': Leaderboard.render(mainContent); break;
             case 'community': Community.render(mainContent); break;
             case 'collection': Collection.render(mainContent); break;
-            case 'help': HelpModule.render(mainContent); break;
+            case 'help': await HelpModule.render(mainContent); break;
         }
 
+        // 在 render 完成后设置动画（确保内容已渲染到 DOM）
+        mainContent.style.animation = 'none';
+        mainContent.offsetHeight;
+        mainContent.style.animation = 'fadeIn 0.3s ease';
         mainContent.scrollTop = 0;
         window.scrollTo({ top: 0, behavior: 'smooth' });
     },

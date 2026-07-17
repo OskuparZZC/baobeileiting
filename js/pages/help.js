@@ -6,10 +6,21 @@ const HelpModule = {
     filterCategory: 'all', // 当前分类筛选
     expandedCardId: null,  // 当前展开的卡片 ID（单展开模式）
 
-    render(container) {
+    async render(container) {
         const user = App.getCurrentUser();
         const userName = user ? user.name : '未知用户';
         const userClass = user ? user.className : '未知班级';
+
+        // 初始化后端用户 ID（dev 模式需要 x-user-id）
+        if (user && user._backendId) {
+            HelpData.setCurrentUser(user._backendId);
+        }
+
+        // 异步获取各 Tab 内容
+        let hallHtml = '';
+        if (this.currentTab === 'hall') hallHtml = await this.renderHall();
+        let myHtml = '';
+        if (this.currentTab === 'my') myHtml = await this.renderMyBounties();
 
         container.innerHTML = `
             <!-- 页面标题 -->
@@ -34,8 +45,8 @@ const HelpModule = {
             <!-- Tab 内容区域 -->
             <div class="help-content" id="helpContent">
                 ${this.currentTab === 'publish' ? this.renderPublishForm() : ''}
-                ${this.currentTab === 'hall' ? this.renderHall() : ''}
-                ${this.currentTab === 'my' ? this.renderMyBounties() : ''}
+                ${this.currentTab === 'hall' ? hallHtml : ''}
+                ${this.currentTab === 'my' ? myHtml : ''}
             </div>
         `;
 
@@ -124,7 +135,7 @@ const HelpModule = {
         `;
     },
 
-    renderHall() {
+    async renderHall() {
         // 映射筛选值到分类
         const filterMap = {
             'package': 'package',
@@ -133,7 +144,7 @@ const HelpModule = {
             'other': 'other',
         };
 
-        let bounties = HelpData.getBounties().filter(b => b.status === 'open');
+        let bounties = (await HelpData.getBounties()).filter(b => b.status === 'open');
         // 分类筛选
         if (this.filterCategory !== 'all' && filterMap[this.filterCategory]) {
             bounties = bounties.filter(b => b.category === filterMap[this.filterCategory]);
@@ -175,7 +186,11 @@ const HelpModule = {
         const catInfo = HelpData.getCategoryInfo(bounty.category);
         const urgencyInfo = HelpData.getUrgencyInfo(bounty.urgency);
         const timeStr = HelpData.formatTime(bounty.createdAt);
-        const isExpanded = this.expandedCardId === bounty.id;
+        // 注意：expandedCardId 来自 dataset（string），bounty.id 来自后端（number），需类型统一比较
+        const isExpanded = String(this.expandedCardId) === String(bounty.id);
+        console.log('[DEBUG] renderBountyCard id:', bounty.id, 'type:', typeof bounty.id,
+            'expandedCardId:', this.expandedCardId, 'type:', typeof this.expandedCardId,
+            'isExpanded:', isExpanded);
         const statusInfo = this.getStatusTagInfo(bounty.status);
 
         // 截止时间
@@ -238,12 +253,12 @@ const HelpModule = {
 
     // ==================== 3. 我的悬赏 ====================
 
-    renderMyBounties() {
+    async renderMyBounties() {
         const user = App.getCurrentUser();
-        const userId = user ? user.id : '';
+        const userId = user ? user._backendId : '';
 
-        const myPublished = HelpData.getMyPublishedBounties(userId);
-        const myAccepted = HelpData.getMyAcceptedBounties(userId);
+        const myPublished = await HelpData.getMyPublishedBounties(userId);
+        const myAccepted = await HelpData.getMyAcceptedBounties(userId);
 
         return `
             <div class="my-bounties-section">
@@ -290,7 +305,7 @@ const HelpModule = {
         const catInfo = HelpData.getCategoryInfo(bounty.category);
         const statusInfo = this.getStatusTagInfo(bounty.status);
         const timeStr = HelpData.formatTime(bounty.createdAt);
-        const isExpanded = this.expandedCardId === bounty.id;
+        const isExpanded = String(this.expandedCardId) === String(bounty.id);
 
         // 截止时间
         let deadlineStr = '';
@@ -307,7 +322,7 @@ const HelpModule = {
                         <i class="fas fa-times"></i> 取消
                     </button>
                 `;
-            } else if (bounty.status === 'accepted') {
+            } else if (bounty.status === 'submitted') {
                 actionButtons = `
                     <button class="btn btn-sm btn-primary complete-btn" data-bounty-id="${bounty.id}">
                         <i class="fas fa-check"></i> 确认完成
@@ -371,6 +386,7 @@ const HelpModule = {
         const map = {
             open:      { label: '可接受', dot: '🟢', color: '#2E7D32', bgColor: '#E8F5E9' },
             accepted:  { label: '已接受', dot: '🟡', color: '#E65100', bgColor: '#FFF3E0' },
+            submitted: { label: '待确认', dot: '🟠', color: '#BF360C', bgColor: '#FBE9E7' },
             completed: { label: '已完成', dot: '🔵', color: '#1565C0', bgColor: '#E3F2FD' },
             cancelled: { label: '已取消', dot: '⚪', color: '#757575', bgColor: '#F5F5F5' },
         };
@@ -382,11 +398,11 @@ const HelpModule = {
     bindEvents() {
         // Tab 切换
         document.querySelectorAll('.help-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
+            tab.addEventListener('click', async () => {
                 this.currentTab = tab.dataset.tab;
                 this.expandedCardId = null; // 切换 tab 重置展开状态
                 const mainContent = document.getElementById('mainContent');
-                this.render(mainContent);
+                await this.render(mainContent);
             });
         });
 
@@ -444,7 +460,7 @@ const HelpModule = {
         // 提交按钮
         const submitBtn = document.getElementById('submitBountyBtn');
         if (submitBtn) {
-            submitBtn.addEventListener('click', () => {
+            submitBtn.addEventListener('click', async () => {
                 const title = document.getElementById('bountyTitle').value.trim();
                 const desc = document.getElementById('bountyDesc').value.trim();
                 const reward = document.getElementById('bountyReward').value.trim();
@@ -455,7 +471,7 @@ const HelpModule = {
                 if (!desc) { App.showToast('请输入详细描述'); return; }
 
                 const user = App.getCurrentUser();
-                const newBounty = HelpData.createBounty({
+                const newBounty = await HelpData.createBounty({
                     title,
                     description: desc,
                     reward,
@@ -463,7 +479,7 @@ const HelpModule = {
                     urgency: selectedUrgency,
                     location,
                     deadline,
-                    publisherId: user ? user.id : '',
+                    publisherId: user ? user._backendId : '',
                     publisherName: user ? user.name : '匿名',
                     publisherClass: user ? user.className : '',
                 });
@@ -473,7 +489,7 @@ const HelpModule = {
                 this.currentTab = 'hall';
                 this.expandedCardId = null;
                 const mainContent = document.getElementById('mainContent');
-                this.render(mainContent);
+                await this.render(mainContent);
             });
         }
     },
@@ -483,13 +499,15 @@ const HelpModule = {
             chip.addEventListener('click', () => {
                 this.filterCategory = chip.dataset.filter;
                 this.expandedCardId = null;
-                // 只更新悬赏大厅内容
+                // 异步获取悬赏大厅内容
                 const helpContent = document.getElementById('helpContent');
                 if (helpContent) {
-                    helpContent.innerHTML = this.renderHall();
-                    this.bindFilterEvents();
-                    this.bindHallEvents();
-                    this.bindCardToggleEvents();
+                    this.renderHall().then(html => {
+                        helpContent.innerHTML = html;
+                        this.bindFilterEvents();
+                        this.bindHallEvents();
+                        this.bindCardToggleEvents();
+                    });
                 }
             });
         });
@@ -497,31 +515,27 @@ const HelpModule = {
 
     bindHallEvents() {
         document.querySelectorAll('.accept-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const bountyId = btn.dataset.bountyId;
-                const bounty = HelpData.getBounty(bountyId);
+                const bounty = await HelpData.getBounty(bountyId);
                 if (!bounty) return;
 
                 const user = App.getCurrentUser();
                 if (!user) { App.showToast('请先登录'); return; }
 
-                if (bounty.publisherId === user.id) {
+                if (bounty.publisherId === user._backendId) {
                     App.showToast('不能接自己发布的悬赏哦');
                     return;
                 }
 
                 if (confirm(`确定要接「${bounty.title}」这个悬赏吗？`)) {
-                    HelpData.acceptBounty(bountyId, {
-                        id: user.id,
-                        name: user.name,
-                        className: user.className,
-                    });
+                    await HelpData.acceptBounty(bountyId);
                     App.showToast('接单成功！请尽快完成 🤝');
                     this.currentTab = 'my';
                     this.expandedCardId = null;
                     const mainContent = document.getElementById('mainContent');
-                    this.render(mainContent);
+                    await this.render(mainContent);
                 }
             });
         });
@@ -530,53 +544,51 @@ const HelpModule = {
     bindMyBountiesEvents() {
         // 取消悬赏
         document.querySelectorAll('.cancel-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const bountyId = btn.dataset.bountyId;
                 if (confirm('确定要取消这个悬赏吗？')) {
-                    HelpData.cancelBounty(bountyId);
+                    await HelpData.cancelBounty(bountyId);
                     App.showToast('悬赏已取消');
                     const mainContent = document.getElementById('mainContent');
-                    this.render(mainContent);
+                    await this.render(mainContent);
                 }
             });
         });
 
         // 确认完成（发布者操作：仅改状态，不给 XP）
         document.querySelectorAll('.complete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const bountyId = btn.dataset.bountyId;
                 if (confirm('确认该悬赏已完成？完成后接单的同学将获得奖励。')) {
-                    HelpData.completeBounty(bountyId);
+                    await HelpData.completeBounty(bountyId);
 
                     // 发布者确认完成不给 XP，只提示状态变更
                     App.showToast('悬赏已确认完成 ✓');
 
                     const mainContent = document.getElementById('mainContent');
-                    this.render(mainContent);
+                    await this.render(mainContent);
                 }
             });
         });
 
-        // 我已完成（接受者操作：改状态 + 奖励 XP）
+        // 我已完成（接受者操作：提交完成申请，等待发布者确认）
         document.querySelectorAll('.accept-complete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const bountyId = btn.dataset.bountyId;
-                if (confirm('确认你已完成这个悬赏任务？')) {
-                    HelpData.completeBounty(bountyId);
+                if (confirm('确认你已完成这个悬赏任务？将通知发布者确认。')) {
+                    const result = await HelpData.submitComplete(bountyId);
 
-                    // 完成互助：+20 XP（奖励给接受者，即当前用户）
-                    const xpResult = App.addXP(20, '完成互助', 'COMPLETE_BOUNTY', bountyId);
-                    if (xpResult.leveledUp) {
-                        App.showXPToast(`🎉 完成互助！+${xpResult.xpGained}XP | 升级到 Lv.${xpResult.newLevel} ${xpResult.newTitle}！`, 3000);
+                    if (result) {
+                        App.showToast('已提交完成，等待发布者确认');
                     } else {
-                        App.showXPToast(`🎉 完成互助！+${xpResult.xpGained}XP`, 2500);
+                        App.showToast('提交失败，请重试');
                     }
 
                     const mainContent = document.getElementById('mainContent');
-                    this.render(mainContent);
+                    await this.render(mainContent);
                 }
             });
         });
@@ -584,16 +596,30 @@ const HelpModule = {
 
     // 卡片折叠事件（单展开模式）
     bindCardToggleEvents() {
-        document.querySelectorAll('.bounty-card').forEach(card => {
+        console.log('[DEBUG] bindCardToggleEvents called, tab:', this.currentTab);
+        const cards = document.querySelectorAll('.bounty-card');
+        console.log('[DEBUG] Found', cards.length, '.bounty-card elements');
+
+        cards.forEach(card => {
             const summary = card.querySelector('.bounty-card-summary');
-            if (!summary) return;
+            if (!summary) {
+                console.log('[DEBUG] No .bounty-card-summary in card', card.dataset.bountyId);
+                return;
+            }
 
-            // 移除旧事件（避免重复绑定）
-            const newSummary = summary.cloneNode(true);
-            summary.parentNode.replaceChild(newSummary, summary);
+            // 防止重复绑定
+            if (summary.dataset.toggleBound === 'true') {
+                console.log('[DEBUG] Card already bound:', card.dataset.bountyId);
+                return;
+            }
+            summary.dataset.toggleBound = 'true';
+            console.log('[DEBUG] Binding click to card:', card.dataset.bountyId);
 
-            newSummary.addEventListener('click', () => {
+            summary.addEventListener('click', (e) => {
+                console.log('[DEBUG] CLICK EVENT FIRED, target:', e.target.tagName, e.target.className);
+                console.log('[DEBUG] bountyId:', card.dataset.bountyId, 'this===HelpModule:', this === HelpModule);
                 const bountyId = card.dataset.bountyId;
+                console.log('[DEBUG] Before toggle, expandedCardId:', this.expandedCardId);
 
                 // 如果点击的是当前已展开的卡片，则折叠
                 if (this.expandedCardId === bountyId) {
@@ -602,20 +628,40 @@ const HelpModule = {
                     // 折叠之前展开的卡片
                     this.expandedCardId = bountyId;
                 }
+                console.log('[DEBUG] After toggle, expandedCardId:', this.expandedCardId);
 
                 // 刷新当前 tab 内容以更新展开状态
                 const helpContent = document.getElementById('helpContent');
+                console.log('[DEBUG] helpContent found:', !!helpContent, 'tab:', this.currentTab);
                 if (!helpContent) return;
 
                 if (this.currentTab === 'hall') {
-                    helpContent.innerHTML = this.renderHall();
-                    this.bindFilterEvents();
-                    this.bindHallEvents();
+                    console.log('[DEBUG] Calling renderHall...');
+                    this.renderHall().then(html => {
+                        console.log('[DEBUG] renderHall resolved, html length:', html.length);
+                        helpContent.innerHTML = html;
+                        console.log('[DEBUG] innerHTML set, re-binding...');
+                        this.bindFilterEvents();
+                        this.bindHallEvents();
+                        this.bindCardToggleEvents();
+                        // 验证展开是否生效
+                        const expandedCard = helpContent.querySelector(`.bounty-card[data-bounty-id="${bountyId}"]`);
+                        const detailDiv = expandedCard ? expandedCard.querySelector('.bounty-card-detail') : null;
+                        console.log('[DEBUG] Card in DOM:', !!expandedCard, 'detail display:', detailDiv ? detailDiv.style.display : 'N/A');
+                    }).catch(err => {
+                        console.error('[DEBUG] renderHall FAILED:', err);
+                    });
                 } else if (this.currentTab === 'my') {
-                    helpContent.innerHTML = this.renderMyBounties();
-                    this.bindMyBountiesEvents();
+                    console.log('[DEBUG] Calling renderMyBounties...');
+                    this.renderMyBounties().then(html => {
+                        console.log('[DEBUG] renderMyBounties resolved, html length:', html.length);
+                        helpContent.innerHTML = html;
+                        this.bindMyBountiesEvents();
+                        this.bindCardToggleEvents();
+                    }).catch(err => {
+                        console.error('[DEBUG] renderMyBounties FAILED:', err);
+                    });
                 }
-                this.bindCardToggleEvents();
             });
         });
     },

@@ -199,13 +199,14 @@ CREATE TABLE IF NOT EXISTS bounties (
   acceptor_id   VARCHAR(36)   COMMENT '接单者 UUID',
 
   -- 状态
-  status        VARCHAR(20)   DEFAULT 'open' COMMENT '状态 (open/accepted/completed/cancelled)',
+  status        VARCHAR(20)   DEFAULT 'open' COMMENT '状态 (open/accepted/submitted/completed/cancelled)',
 
   -- 扩展
   view_count    INT           DEFAULT 0 COMMENT '浏览次数',
 
   created_at    DATETIME      DEFAULT CURRENT_TIMESTAMP,
   accepted_at   DATETIME      COMMENT '接单时间',
+  submitted_at  DATETIME      COMMENT '提交完成时间',
   completed_at  DATETIME      COMMENT '完成时间',
 
   INDEX idx_publisher (publisher_id),
