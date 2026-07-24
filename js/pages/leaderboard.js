@@ -138,7 +138,7 @@ const Leaderboard = {
                 </div>
                 <span class="top-name">${user.name}${user.isMe ? ' 👈' : ''}</span>
                 <span class="top-dept">${user.className}</span>
-                <span class="top-cups">${user.cups} 杯</span>
+                <span class="top-cups">${user.cups} 杯${user.totalXp != null ? ` · ${user.totalXp} XP` : ''}</span>
             </div>
         `;
     },
@@ -163,6 +163,7 @@ const Leaderboard = {
                     </div>
                     <div class="lb-stats">
                         <span class="lb-cups">${user.cups}杯</span>
+                        ${user.totalXp != null ? `<span class="lb-xp">${user.totalXp} XP</span>` : ''}
                         ${user.level ? `<span class="lb-level">Lv.${user.level}</span>` : ''}
                     </div>
                 </div>
@@ -226,6 +227,7 @@ const Leaderboard = {
             .lb-dept { display: block; font-size: var(--font-size-xs); color: var(--color-text-light); }
             .lb-stats { text-align: right; display: flex; flex-direction: column; gap: 2px; }
             .lb-cups { font-weight: 700; color: var(--color-primary); font-size: var(--font-size-md); }
+            .lb-xp { font-size: var(--font-size-xs); color: var(--color-text-light); }
             .lb-level { font-size: var(--font-size-xs); color: var(--color-accent); }
             .leaderboard-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 16px; }
             .loading-spinner { width: 36px; height: 36px; border: 3px solid var(--color-border); border-top-color: var(--color-primary); border-radius: 50%; animation: lb-spin 0.8s linear infinite; }
